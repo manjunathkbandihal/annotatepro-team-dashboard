@@ -1,0 +1,16 @@
+AnnotatePro Dashboard - Ready Package
+
+1. Open PowerShell in this project folder.
+2. Run:
+   npm install
+3. Then:
+   npm run dev
+4. Open:
+   http://localhost:5173/
+
+The Vite configuration includes the EBUSY watcher fix so Vite should not
+try to watch unrelated Slack/AppData files.
+
+Important:
+This package keeps your existing dashboard data/code as provided.
+No online database/Vercel connection has been added yet.

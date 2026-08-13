@@ -1,0 +1,20 @@
+AnnotatePro update
+
+Updated:
+1. Accuracy Report Excel import now supports the Date column and Excel serial/text date formats.
+2. Header matching is more flexible for columns such as Accuracy(%), Daily Count, Detailed Report, Images Used, etc.
+3. QA & Reviews now has date filters: All dates, Today, Yesterday, Day before yesterday, Last 7 days, This week, Last week, This month, Last month, This year, Last year.
+4. Analytics uses the same date filter and automatically reads dates from both Daily Effort and Accuracy Report.
+5. Date ranges are based on the current date in the browser.
+6. The existing Team editing and no-duplicate-member behavior is preserved.
+
+Build note:
+The supplied ZIP contains an existing node_modules folder that may not match the current OS. If needed, run:
+npm install
+npm run dev
+
+
+Additional fixes in this build:
+7. QA & Reviews and Analytics normalize imported/stored dates before filtering, including ISO timestamps and common Excel/text date formats. Single-date filters compare exact YYYY-MM-DD dates and range filters are inclusive.
+8. Projects now have an Edit (pencil) option on every existing project card.
+9. Project editing supports project name, daily target, completed count and deadline. Status and remaining images are recalculated automatically when saved.
