@@ -1,14 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createRoot } from "react-dom/client";
 import {
   LayoutDashboard, Users, FolderKanban, ClipboardCheck,
   AlertTriangle, BarChart3, Settings, Search, Plus, Bell,
-  Download, Upload, Menu, X, CheckCircle2, Target, Pencil, Save,
-  ExternalLink, Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck
+  Download, Upload, Menu, X, CheckCircle2, Target,
+  Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck
 } from "lucide-react";
 import "./styles.css";
-import { supabase, isSupabaseConfigured } from "./supabaseClient";
 
 /* =========================================================
    PROJECT TARGETS
@@ -41,7 +40,7 @@ function getProjectStatus(total, completed, remaining) {
 function getProjectStats(project) {
   const total = Math.max(
     0,
-    Number(project.totalImages ?? project.total ?? project.target) || 0
+    Number(project.target ?? project.total) || 0
   );
 
   let completed;
@@ -85,17 +84,14 @@ const seed = {
     { id: 6, name: "Kiran", role: "Annotator", target: 1000, completed: 581, reviewed: 240, errors: 21, status: "Away" }
   ],
   projects: [
-    { id: 1, name: "momah_phase2_april", target: 1000, totalImages: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
-    { id: 2, name: "MBS_Street_Detections_Phase2", target: 1000, totalImages: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
-    { id: 3, name: "MBS_frames_june_phase2", target: 1000, totalImages: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
-    { id: 4, name: "combined_aug_data_1", target: 800, totalImages: 800, total: 800, completed: 0, remaining: 800, status: "Pending", deadline: "" },
-    { id: 5, name: "iltwy_73026_53front_1", target: 350, totalImages: 350, total: 350, completed: 0, remaining: 350, status: "Pending", deadline: "" }
+    { id: 1, name: "momah_phase2_april", target: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
+    { id: 2, name: "MBS_Street_Detections_Phase2", target: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
+    { id: 3, name: "MBS_frames_june_phase2", target: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
+    { id: 4, name: "combined_aug_data_1", target: 800, total: 800, completed: 0, remaining: 800, status: "Pending", deadline: "" },
+    { id: 5, name: "iltwy_73026_53front_1", target: 350, total: 350, completed: 0, remaining: 350, status: "Pending", deadline: "" }
   ],
-  accuracyRecords: [],
-  accuracyFile: "",
-  accuracyLastSync: "",
-  teamDeleted: [],
-  issues: [    { id: 1, type: "Missed labels", project: "PCI_Annotations", owner: "Priya", severity: "High", status: "Open", date: "2026-08-11" },
+  issues: [
+    { id: 1, type: "Missed labels", project: "PCI_Annotations", owner: "Priya", severity: "High", status: "Open", date: "2026-08-11" },
     { id: 2, type: "Wrong prediction", project: "hase2_july_data_1", owner: "Kiran", severity: "Medium", status: "Open", date: "2026-08-11" },
     { id: 3, type: "Label inconsistency", project: "PCI_Annotations", owner: "Rahul", severity: "Low", status: "Resolved", date: "2026-08-10" }
   ]
@@ -112,24 +108,11 @@ function loadData() {
       team: Array.isArray(saved.team) ? saved.team : seed.team,
       projects: Array.isArray(saved.projects)
         ? saved.projects.map(p => {
-            const totalImages = Math.max(0, Number(p.totalImages ?? p.total ?? p.target) || 0);
-            const normalized = { ...p, totalImages };
-            const s = getProjectStats(normalized);
-            return { ...normalized, ...s, totalImages, target: Math.max(0, Number(p.target) || 0), total: totalImages };
+            const s = getProjectStats(p);
+            return { ...p, ...s, target: s.total, total: s.total };
           })
         : seed.projects,
-      sheetRecords: Array.isArray(saved.sheetRecords)
-        ? saved.sheetRecords.map(r => ({ ...r, date: normalizeDateValue(r.date) }))
-        : [],
-      accuracyRecords: Array.isArray(saved.accuracyRecords)
-        ? saved.accuracyRecords.map(r => ({ ...r, date: normalizeDateValue(r.date) }))
-        : [],
-      accuracyFile: saved.accuracyFile || "",
-      accuracyLastSync: saved.accuracyLastSync || "",
-      sheetFile: saved.sheetFile || "",
-      sheetLastSync: saved.sheetLastSync || "",
-      issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
-      teamDeleted: Array.isArray(saved.teamDeleted) ? saved.teamDeleted : []
+      issues: Array.isArray(saved.issues) ? saved.issues : seed.issues
     };
   } catch {
     return seed;
@@ -138,67 +121,6 @@ function loadData() {
 
 function saveData(data) {
   localStorage.setItem("annotatepro-data", JSON.stringify(data));
-}
-
-async function loadOnlineData() {
-  if (!isSupabaseConfigured || !supabase) return null;
-
-  const { data: row, error } = await supabase
-    .from("dashboard_state")
-    .select("data")
-    .eq("id", 1)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Supabase load failed:", error);
-    return null;
-  }
-
-  if (!row?.data) return null;
-
-  const saved = row.data;
-  return {
-    ...seed,
-    ...saved,
-    team: Array.isArray(saved.team) ? saved.team : seed.team,
-    projects: Array.isArray(saved.projects)
-      ? saved.projects.map(p => {
-          const totalImages = Math.max(0, Number(p.totalImages ?? p.total ?? p.target) || 0);
-          const normalized = { ...p, totalImages };
-          const s = getProjectStats(normalized);
-          return { ...normalized, ...s, totalImages, target: Math.max(0, Number(p.target) || 0), total: totalImages };
-        })
-      : seed.projects,
-    sheetRecords: Array.isArray(saved.sheetRecords)
-      ? saved.sheetRecords.map(r => ({ ...r, date: normalizeDateValue(r.date) }))
-      : [],
-    accuracyRecords: Array.isArray(saved.accuracyRecords)
-      ? saved.accuracyRecords.map(r => ({ ...r, date: normalizeDateValue(r.date) }))
-      : [],
-    accuracyFile: saved.accuracyFile || "",
-    accuracyLastSync: saved.accuracyLastSync || "",
-    sheetFile: saved.sheetFile || "",
-    sheetLastSync: saved.sheetLastSync || "",
-    issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
-    teamDeleted: Array.isArray(saved.teamDeleted) ? saved.teamDeleted : []
-  };
-}
-
-async function saveOnlineData(data) {
-  if (!isSupabaseConfigured || !supabase) return;
-
-  const { error } = await supabase
-    .from("dashboard_state")
-    .upsert({
-      id: 1,
-      data,
-      updated_at: new Date().toISOString()
-    }, { onConflict: "id" });
-
-  if (error) {
-    console.error("Supabase save failed:", error);
-    throw error;
-  }
 }
 
 function getConfiguredProjectName(project) {
@@ -210,262 +132,20 @@ function getConfiguredProjectName(project) {
 }
 
 /* =========================================================
-   DATE HELPERS
-   Handles Excel serial dates, Date values, and common text dates.
-========================================================= */
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-
-function toISODate(year, month, day) {
-  const y = Number(year), m = Number(month), d = Number(day);
-  if (!y || !m || !d) return "";
-  const date = new Date(y, m - 1, d);
-  if (Number.isNaN(date.getTime())) return "";
-  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return "";
-  return `${y}-${pad2(m)}-${pad2(d)}`;
-}
-
-function normalizeDateValue(value) {
-  if (value == null || value === "") return "";
-
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return toISODate(value.getFullYear(), value.getMonth() + 1, value.getDate());
-  }
-
-  if (typeof value === "number" && Number.isFinite(value) && value > 20000 && value < 80000) {
-    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
-    const d = new Date(excelEpoch.getTime() + Math.round(value * 86400000));
-    return toISODate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
-  }
-
-  const text = String(value).trim();
-  let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-  if (m) return toISODate(m[1], m[2], m[3]);
-
-  m = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
-  if (m) return toISODate(m[3], m[2], m[1]);
-
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime())
-    ? ""
-    : toISODate(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate());
-}
-
-function getDateRange(filter) {
-  if (!filter) {
-    return { start: "", end: "", label: "Select a date" };
-  }
-
-  const start = filter.start || "";
-  const end = filter.mode === "range" ? (filter.end || "") : start;
-
-  if (!start) {
-    return { start: "", end: "", label: filter.mode === "range" ? "Select a date range" : "Select a date" };
-  }
-
-  if (filter.mode === "range" && !end) {
-    return { start, end: "", label: `${start} → Select end date` };
-  }
-
-  if (filter.mode === "range" && end < start) {
-    return { start: end, end: start, label: `${end} → ${start}` };
-  }
-
-  return {
-    start,
-    end,
-    label: start === end ? start : `${start} → ${end}`
-  };
-}
-
-function isDateInRange(date, range) {
-  if (!range.start || !range.end || !date) return false;
-
-  // Always compare normalized YYYY-MM-DD values. This prevents
-  // stored ISO timestamps (e.g. 2026-08-12T00:00:00.000Z) or
-  // Excel/text date formats from being excluded accidentally.
-  const normalized = normalizeDateValue(date);
-  return normalized >= range.start && normalized <= range.end;
-}
-
-function getLatestImportedDate(data) {
-  const dates = [
-    ...(Array.isArray(data?.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
-    ...(Array.isArray(data?.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(Boolean).sort();
-
-  return dates.length ? dates[dates.length - 1] : "";
-}
-
-function DateFilter({ value, onChange, data }) {
-  const allDates = [
-    ...(Array.isArray(data.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
-    ...(Array.isArray(data.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(Boolean).sort();
-
-  const firstDate = allDates[0] || "";
-  const lastDate = allDates[allDates.length - 1] || "";
-  const mode = value?.mode || "single";
-
-  const updateFilter = patch => {
-    const next = { ...value, ...patch };
-
-    if (next.mode === "single") {
-      next.end = next.start || "";
-    }
-
-    onChange(next);
-  };
-
-  const switchMode = nextMode => {
-    if (nextMode === "range") {
-      onChange({
-        mode: "range",
-        start: value?.start || firstDate,
-        end: value?.end || lastDate || value?.start || firstDate
-      });
-    } else {
-      onChange({
-        mode: "single",
-        start: value?.start || lastDate,
-        end: value?.start || lastDate
-      });
-    }
-  };
-
-  return (
-    <div className="date-filter">
-      <div className="date-filter-info">
-        <b>Report date</b>
-        <small>
-          {mode === "range"
-            ? (value?.start && value?.end
-                ? `${value.start} → ${value.end}`
-                : "Select a start and end date")
-            : (value?.start || "Select a date")}
-        </small>
-      </div>
-
-      <div className="date-filter-controls">
-        <div className="date-filter-mode">
-          <button
-            type="button"
-            className={mode === "single" ? "active" : ""}
-            onClick={() => switchMode("single")}
-          >
-            Single date
-          </button>
-          <button
-            type="button"
-            className={mode === "range" ? "active" : ""}
-            onClick={() => switchMode("range")}
-          >
-            From → To
-          </button>
-        </div>
-
-        {mode === "single" ? (
-          <input
-            type="date"
-            value={value?.start || ""}
-            min={firstDate || undefined}
-            max={lastDate || undefined}
-            onChange={e => updateFilter({ start: e.target.value })}
-            aria-label="Select report date"
-          />
-        ) : (
-          <div className="date-range-inputs">
-            <label>
-              <span>From</span>
-              <input
-                type="date"
-                value={value?.start || ""}
-                min={firstDate || undefined}
-                max={value?.end || lastDate || undefined}
-                onChange={e => updateFilter({ start: e.target.value })}
-                aria-label="Report start date"
-              />
-            </label>
-            <span className="date-range-arrow">→</span>
-            <label>
-              <span>To</span>
-              <input
-                type="date"
-                value={value?.end || ""}
-                min={value?.start || firstDate || undefined}
-                max={lastDate || undefined}
-                onChange={e => updateFilter({ end: e.target.value })}
-                aria-label="Report end date"
-              />
-            </label>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
    APP
 ========================================================= */
 function App() {
   const [data, setData] = useState(loadData);
   const [page, setPage] = useState("dashboard");
-  const [storageStatus, setStorageStatus] = useState(
-    isSupabaseConfigured ? "connecting" : "local"
-  );
   const [query, setQuery] = useState("");
   const [sidebar, setSidebar] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [addType, setAddType] = useState("team");
-  const [editingProject, setEditingProject] = useState(null);
   const [toast, setToast] = useState("");
-
-  useEffect(() => {
-    let active = true;
-
-    async function syncFromCloud() {
-      if (!isSupabaseConfigured) {
-        setStorageStatus("local");
-        return;
-      }
-
-      const cloudData = await loadOnlineData();
-
-      if (!active) return;
-
-      if (cloudData) {
-        setData(cloudData);
-        saveData(cloudData);
-        setStorageStatus("online");
-      } else {
-        // First online run: publish the existing local dashboard data.
-        try {
-          await saveOnlineData(data);
-          if (active) setStorageStatus("online");
-        } catch {
-          if (active) setStorageStatus("error");
-        }
-      }
-    }
-
-    syncFromCloud();
-
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const update = next => {
     setData(next);
     saveData(next);
-
-    if (isSupabaseConfigured) {
-      saveOnlineData(next)
-        .then(() => setStorageStatus("online"))
-        .catch(() => setStorageStatus("error"));
-    }
   };
 
   const notify = msg => {
@@ -516,25 +196,12 @@ function App() {
     let next = { ...data };
 
     if (addType === "team") {
-      const name = String(f.get("name") || "").trim();
-
-      const duplicate = data.team.some(
-        (member) =>
-          String(member.name || "").trim().toLowerCase() ===
-          name.toLowerCase()
-      );
-
-      if (duplicate) {
-        notify("This member already exists. Edit the existing row instead.");
-        return;
-      }
-
       const target = Number(f.get("target") || 1000);
       next.team = [
         ...data.team,
         {
           id: Date.now(),
-          name,
+          name: f.get("name"),
           role: f.get("role"),
           target,
           completed: Number(f.get("completed") || 0),
@@ -543,29 +210,22 @@ function App() {
           status: "Active"
         }
       ];
-
-      next.teamDeleted = (data.teamDeleted || []).filter(
-        deletedName =>
-          String(deletedName).toLowerCase() !== name.toLowerCase()
-      );
     } else if (addType === "project") {
       const name = String(f.get("name") || "").trim();
-      const totalImages = Math.max(0, Number(f.get("totalImages") || 0));
-      const target = Math.max(0, Number(f.get("target") || 0));
-      const completed = Math.max(0, Math.min(totalImages, Number(f.get("completed") || 0)));
-      const remaining = Math.max(0, totalImages - completed);
+      const target = Number(f.get("target") || 0);
+      const completed = Number(f.get("completed") || 0);
+      const remaining = Math.max(0, target - completed);
 
       next.projects = [
         ...data.projects,
         {
           id: Date.now(),
           name,
-          totalImages,
-          total: totalImages,
+          total: target,
           target,
           completed,
           remaining,
-          status: getProjectStatus(totalImages, completed, remaining),
+          status: getProjectStatus(target, completed, remaining),
           deadline: f.get("deadline")
         }
       ];
@@ -587,38 +247,6 @@ function App() {
     update(next);
     setShowAdd(false);
     notify("Saved successfully");
-  }
-
-  function editProject(e) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    if (!editingProject) return;
-
-    const name = String(f.get("name") || "").trim();
-    const totalImages = Math.max(0, Number(f.get("totalImages") || 0));
-    const target = Math.max(0, Number(f.get("target") || 0));
-    const completed = Math.max(0, Math.min(totalImages, Number(f.get("completed") || 0)));
-    const remaining = Math.max(0, totalImages - completed);
-
-    const projects = data.projects.map(project =>
-      project.id === editingProject.id
-        ? {
-            ...project,
-            name,
-            totalImages,
-            target,
-            total: totalImages,
-            completed,
-            remaining,
-            status: getProjectStatus(totalImages, completed, remaining),
-            deadline: f.get("deadline") || ""
-          }
-        : project
-    );
-
-    update({ ...data, projects });
-    setEditingProject(null);
-    notify("Project updated successfully");
   }
 
   function remove(kind, id) {
@@ -658,15 +286,12 @@ function App() {
 
         if (parsed.team && parsed.projects && parsed.issues) {
           const projects = parsed.projects.map(p => {
-            const totalImages = Math.max(0, Number(p.totalImages ?? p.total ?? p.target) || 0);
-            const normalized = { ...p, totalImages };
-            const s = getProjectStats(normalized);
+            const s = getProjectStats(p);
             return {
-              ...normalized,
+              ...p,
               ...s,
-              totalImages,
-              target: Math.max(0, Number(p.target) || 0),
-              total: totalImages
+              target: s.total,
+              total: s.total
             };
           });
 
@@ -761,8 +386,6 @@ function App() {
             <Team
               rows={filteredTeam}
               data={data}
-              update={update}
-              notify={notify}
               openAdd={() => {
                 setAddType("team");
                 setShowAdd(true);
@@ -778,7 +401,6 @@ function App() {
                 setAddType("project");
                 setShowAdd(true);
               }}
-              openEdit={setEditingProject}
             />
           )}
 
@@ -815,14 +437,6 @@ function App() {
           type={addType}
           onClose={() => setShowAdd(false)}
           onSubmit={addRecord}
-        />
-      )}
-
-      {editingProject && (
-        <ProjectEditModal
-          project={editingProject}
-          onClose={() => setEditingProject(null)}
-          onSubmit={editProject}
         />
       )}
 
@@ -1114,63 +728,34 @@ function Panel({ title, action, onAction, children }) {
 /* =========================================================
    TEAM
 ========================================================= */
-function Team({ rows, data, update, notify, openAdd }) {
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({});
-
-  /*
-    Edits made in the Team page are stored in data.teamEdits.
-    This keeps Excel-imported data intact while allowing you to
-    correct/update the visible member/project/target/etc. directly.
-  */
-  const getEditKey = (row) =>
-    `${String(row.name || "").trim().toLowerCase()}|||${String(
-      row.project || "—"
-    ).trim().toLowerCase()}|||${String(row.role || "").trim().toLowerCase()}`;
-
+function Team({ rows, data, openAdd }) {
   const projectRows = useMemo(() => {
     const records = Array.isArray(data.sheetRecords)
       ? data.sheetRecords
       : [];
 
-    const edits = data.teamEdits || {};
-    const deleted = new Set(
-      Array.isArray(data.teamDeleted)
-        ? data.teamDeleted.map(x => String(x).trim().toLowerCase())
-        : []
-    );
-
     if (!records.length) {
-      return rows
-        .filter(x => !deleted.has(String(x.name || "").trim().toLowerCase()))
-        .map((x) => {
-        const base = {
-          id: `member-${x.id}`,
-          name: x.name,
-          project: "—",
-          role: x.role,
-          target: Number(x.target) || 0,
-          completed: Number(x.completed) || 0,
-          reviewed: Number(x.reviewed) || 0,
-          errors: Number(x.errors) || 0,
-          status: x.status || "Active"
-        };
-
-        return {
-          ...base,
-          ...(edits[getEditKey(base)] || {})
-        };
-      });
+      return rows.map(x => ({
+        id: `member-${x.id}`,
+        name: x.name,
+        project: "—",
+        role: x.role,
+        target: Number(x.target) || 0,
+        completed: Number(x.completed) || 0,
+        reviewed: Number(x.reviewed) || 0,
+        errors: Number(x.errors) || 0,
+        status: x.status || "Active"
+      }));
     }
 
     const dates = [
-      ...new Set(records.map((x) => x.date).filter(Boolean))
+      ...new Set(records.map(x => x.date).filter(Boolean))
     ].sort();
 
     const latestDate = dates[dates.length - 1];
 
     const latestRecords = records.filter(
-      (x) =>
+      x =>
         x.date === latestDate &&
         x.project &&
         !["Saturday", "Sunday", "On Leave"].includes(x.project)
@@ -1178,7 +763,7 @@ function Team({ rows, data, update, notify, openAdd }) {
 
     const grouped = {};
 
-    latestRecords.forEach((record) => {
+    latestRecords.forEach(record => {
       const name = String(record.name || "").trim();
       const project = getConfiguredProjectName(record.project);
 
@@ -1212,11 +797,9 @@ function Team({ rows, data, update, notify, openAdd }) {
 
     const result = Object.values(grouped);
 
-    rows.forEach((member) => {
+    rows.forEach(member => {
       const exists = result.some(
-        (x) =>
-          x.name.toLowerCase() ===
-          String(member.name || "").toLowerCase()
+        x => x.name.toLowerCase() === member.name.toLowerCase()
       );
 
       if (!exists) {
@@ -1234,175 +817,18 @@ function Team({ rows, data, update, notify, openAdd }) {
       }
     });
 
-    return result
-      .filter(row => !deleted.has(String(row.name || "").trim().toLowerCase()))
-      .map((row) => ({
-        ...row,
-        ...(edits[getEditKey(row)] || {})
-      }));
-  }, [data.sheetRecords, data.teamEdits, data.teamDeleted, rows]);
+    return result;
+  }, [data.sheetRecords, rows]);
 
   const imported =
     Array.isArray(data.sheetRecords) &&
     data.sheetRecords.length > 0;
 
   const latestDate = imported
-    ? [...new Set(data.sheetRecords.map((x) => x.date).filter(Boolean))]
+    ? [...new Set(data.sheetRecords.map(x => x.date).filter(Boolean))]
         .sort()
         .pop()
     : null;
-
-  function startEdit(row) {
-    setEditingId(row.id);
-    setEditForm({
-      name: row.name || "",
-      project: row.project === "—" ? "" : row.project || "",
-      role: row.role || "Annotator",
-      target: Number(row.target) || 0,
-      completed: Number(row.completed) || 0,
-      reviewed: Number(row.reviewed) || 0,
-      errors: Number(row.errors) || 0,
-      status: row.status || "Active"
-    });
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditForm({});
-  }
-
-  function updateEditField(field, value) {
-    setEditForm((prev) => ({
-      ...prev,
-      [field]: value
-    }));
-  }
-
-  function saveEdit(row) {
-    const name = String(editForm.name || "").trim();
-
-    if (!name) {
-      notify("Member name is required.");
-      return;
-    }
-
-    const target = Math.max(0, Number(editForm.target) || 0);
-    const completed = Math.max(0, Number(editForm.completed) || 0);
-    const reviewed = Math.max(0, Number(editForm.reviewed) || 0);
-    const errors = Math.max(0, Number(editForm.errors) || 0);
-    const project = String(editForm.project || "").trim() || "—";
-
-    const progress = target
-      ? Math.min(100, Math.round((completed / target) * 100))
-      : 0;
-
-    const status =
-      target && progress >= 100
-        ? "Completed"
-        : completed > 0
-        ? "In Progress"
-        : "Pending";
-
-    const cleaned = {
-      name,
-      project,
-      role: editForm.role || "Annotator",
-      target,
-      completed,
-      reviewed,
-      errors,
-      status
-    };
-
-    /*
-      Save the edited row as an override. The imported Excel data
-      remains available and will continue to refresh the base values.
-    */
-    const nextEdits = {
-      ...(data.teamEdits || {})
-    };
-
-    const oldKey = getEditKey(row);
-
-    // Keep the original row key so the edit continues to apply
-    // even after the member/project name is changed.
-    nextEdits[oldKey] = cleaned;
-
-    const nextTeam = Array.isArray(data.team)
-      ? data.team.map((member) => {
-          if (
-            String(member.name || "").trim().toLowerCase() ===
-            String(row.name || "").trim().toLowerCase()
-          ) {
-            return {
-              ...member,
-              name
-            };
-          }
-
-          return member;
-        })
-      : data.team;
-
-    update({
-      ...data,
-      team: nextTeam,
-      teamEdits: nextEdits
-    });
-
-    setEditingId(null);
-    setEditForm({});
-    notify("Team record updated");
-  }
-
-  function deleteMember(row) {
-    const name = String(row.name || "").trim();
-    if (!name) return;
-
-    if (!window.confirm(`Delete ${name} from the team? This will remove all of this member's team records from the dashboard.`)) {
-      return;
-    }
-
-    const key = name.toLowerCase();
-    const nextDeleted = [
-      ...(Array.isArray(data.teamDeleted) ? data.teamDeleted : []),
-      key
-    ].filter((value, index, arr) => arr.indexOf(value) === index);
-
-    const nextTeam = (Array.isArray(data.team) ? data.team : []).filter(
-      member => String(member.name || "").trim().toLowerCase() !== key
-    );
-
-    const nextEdits = Object.fromEntries(
-      Object.entries(data.teamEdits || {}).filter(([editKey, value]) => {
-        const editName = String(value?.name || "").trim().toLowerCase();
-        return editName !== key && !editKey.startsWith(`${name.toLowerCase()}|||`);
-      })
-    );
-
-    update({
-      ...data,
-      team: nextTeam,
-      teamDeleted: nextDeleted,
-      teamEdits: nextEdits
-    });
-
-    if (editingId === row.id) cancelEdit();
-    notify(`${name} deleted`);
-  }
-
-  function inputStyle() {
-    return {
-      width: "100%",
-      minWidth: "85px",
-      padding: "7px 8px",
-      border: "1px solid #d9deea",
-      borderRadius: "7px",
-      background: "#fff",
-      fontSize: "13px",
-      outline: "none"
-    };
-  }
 
   return (
     <Page
@@ -1411,8 +837,8 @@ function Team({ rows, data, update, notify, openAdd }) {
         imported
           ? `Daily project-wise productivity from imported sheet${
               latestDate ? ` • ${latestDate}` : ""
-            }. You can edit any row directly.`
-          : "Monitor and edit individual productivity, targets and quality."
+            }.`
+          : "Monitor individual productivity, targets and quality."
       }
       action="+ Add member"
       onAction={openAdd}
@@ -1431,128 +857,32 @@ function Team({ rows, data, update, notify, openAdd }) {
                 <th>Reviewed</th>
                 <th>Errors</th>
                 <th>Status</th>
-                <th>Action</th>
               </tr>
             </thead>
 
             <tbody>
-              {projectRows.map((x) => {
-                const isEditing = editingId === x.id;
-
-                const target = isEditing
-                  ? Math.max(0, Number(editForm.target) || 0)
-                  : Number(x.target) || 0;
-
-                const completed = isEditing
-                  ? Math.max(0, Number(editForm.completed) || 0)
-                  : Number(x.completed) || 0;
-
-                const reviewed = isEditing
-                  ? Math.max(0, Number(editForm.reviewed) || 0)
-                  : Number(x.reviewed) || 0;
-
-                const errors = isEditing
-                  ? Math.max(0, Number(editForm.errors) || 0)
-                  : Number(x.errors) || 0;
-
+              {projectRows.map(x => {
+                const target = Number(x.target) || 0;
+                const completed = Number(x.completed) || 0;
                 const progress = target
                   ? Math.min(100, Math.round((completed / target) * 100))
                   : 0;
 
-                const calculatedStatus =
-                  target && progress >= 100
-                    ? "Completed"
-                    : completed > 0
-                    ? "In Progress"
-                    : "Pending";
-
                 return (
                   <tr key={x.id}>
                     <td>
-                      {isEditing ? (
-                        <input
-                          style={inputStyle()}
-                          value={editForm.name}
-                          onChange={(e) =>
-                            updateEditField("name", e.target.value)
-                          }
-                        />
-                      ) : (
-                        <div className="person">
-                          <div className="mini-avatar">
-                            {String(x.name || "")
-                              .slice(0, 1)
-                              .toUpperCase()}
-                          </div>
-                          <b>{x.name}</b>
+                      <div className="person">
+                        <div className="mini-avatar">
+                          {x.name.slice(0, 1).toUpperCase()}
                         </div>
-                      )}
+                        <b>{x.name}</b>
+                      </div>
                     </td>
 
-                    <td>
-                      {isEditing ? (
-                        <input
-                          style={inputStyle()}
-                          value={editForm.project}
-                          placeholder="Project name"
-                          onChange={(e) =>
-                            updateEditField("project", e.target.value)
-                          }
-                        />
-                      ) : (
-                        <b>{x.project}</b>
-                      )}
-                    </td>
-
-                    <td>
-                      {isEditing ? (
-                        <select
-                          style={inputStyle()}
-                          value={editForm.role}
-                          onChange={(e) =>
-                            updateEditField("role", e.target.value)
-                          }
-                        >
-                          <option>Annotator</option>
-                          <option>Reviewer</option>
-                          <option>Team Lead</option>
-                        </select>
-                      ) : (
-                        x.role
-                      )}
-                    </td>
-
-                    <td>
-                      {isEditing ? (
-                        <input
-                          style={inputStyle()}
-                          type="number"
-                          min="0"
-                          value={editForm.target}
-                          onChange={(e) =>
-                            updateEditField("target", e.target.value)
-                          }
-                        />
-                      ) : (
-                        target ? target.toLocaleString() : "—"
-                      )}
-                    </td>
-
-                    <td>
-                      {isEditing ? (
-                        <input
-                          style={inputStyle()}
-                          type="number"
-                          min="0"
-                          value={editForm.completed}
-                          onChange={(e) =>
-                            updateEditField("completed", e.target.value)
-                          }
-                        />
-                      ) : (
-                        <b>{completed.toLocaleString()}</b>
-                      )}
-                    </td>
+                    <td><b>{x.project}</b></td>
+                    <td>{x.role}</td>
+                    <td>{target ? target.toLocaleString() : "—"}</td>
+                    <td><b>{completed.toLocaleString()}</b></td>
 
                     <td>
                       <div style={{ minWidth: "100px" }}>
@@ -1563,122 +893,22 @@ function Team({ rows, data, update, notify, openAdd }) {
                       </div>
                     </td>
 
+                    <td>{Number(x.reviewed).toLocaleString()}</td>
+
                     <td>
-                      {isEditing ? (
-                        <input
-                          style={inputStyle()}
-                          type="number"
-                          min="0"
-                          value={editForm.reviewed}
-                          onChange={(e) =>
-                            updateEditField("reviewed", e.target.value)
-                          }
-                        />
-                      ) : (
-                        reviewed.toLocaleString()
-                      )}
+                      <span className={x.errors > 15 ? "danger-text" : "good-text"}>
+                        {x.errors}
+                      </span>
                     </td>
 
                     <td>
-                      {isEditing ? (
-                        <input
-                          style={inputStyle()}
-                          type="number"
-                          min="0"
-                          value={editForm.errors}
-                          onChange={(e) =>
-                            updateEditField("errors", e.target.value)
-                          }
-                        />
-                      ) : (
-                        <span
-                          className={
-                            errors > 15 ? "danger-text" : "good-text"
-                          }
-                        >
-                          {errors}
-                        </span>
-                      )}
-                    </td>
-
-                    <td>
-                      {isEditing ? (
-                        <Status text={calculatedStatus} />
-                      ) : (
-                        <Status
-                          text={
-                            target && progress >= 100
-                              ? "Completed"
-                              : x.status
-                          }
-                        />
-                      )}
-                    </td>
-
-                    <td>
-                      {isEditing ? (
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "6px",
-                            alignItems: "center"
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="primary"
-                            style={{
-                              padding: "7px 9px",
-                              minWidth: "auto"
-                            }}
-                            title="Save"
-                            onClick={() => saveEdit(x)}
-                          >
-                            <Save size={15} />
-                          </button>
-
-                          <button
-                            type="button"
-                            className="secondary"
-                            style={{
-                              padding: "7px 9px",
-                              minWidth: "auto"
-                            }}
-                            title="Cancel"
-                            onClick={cancelEdit}
-                          >
-                            <X size={15} />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="secondary"
-                          style={{
-                            padding: "7px 10px",
-                            minWidth: "auto"
-                          }}
-                          title="Edit this member"
-                          onClick={() => startEdit(x)}
-                        >
-                          <Pencil size={15} />
-                          Edit
-                        </button>
-
-                        <button
-                          type="button"
-                          className="delete"
-                          style={{
-                            padding: "7px 9px",
-                            minWidth: "auto"
-                          }}
-                          title="Delete this member"
-                          aria-label={`Delete ${x.name}`}
-                          onClick={() => deleteMember(x)}
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      )}
+                      <Status
+                        text={
+                          target && progress >= 100
+                            ? "Completed"
+                            : x.status
+                        }
+                      />
                     </td>
                   </tr>
                 );
@@ -1694,7 +924,7 @@ function Team({ rows, data, update, notify, openAdd }) {
 /* =========================================================
    PROJECTS
 ========================================================= */
-function Projects({ rows, remove, openAdd, openEdit }) {
+function Projects({ rows, remove, openAdd }) {
   return (
     <Page
       title="Projects"
@@ -1713,47 +943,22 @@ function Projects({ rows, remove, openAdd, openEdit }) {
                   <FolderKanban />
                 </div>
 
-                <div className="project-card-actions">
-                  <button
-                    className="icon-btn project-edit-btn"
-                    type="button"
-                    title="Edit project"
-                    aria-label={`Edit ${p.name}`}
-                    onClick={() => openEdit(p)}
-                  >
-                    <Pencil size={16} />
-                  </button>
-
-                  <button
-                    className="delete"
-                    type="button"
-                    title="Delete project"
-                    aria-label={`Delete ${p.name}`}
-                    onClick={() => remove("projects", p.id)}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
+                <button
+                  className="delete"
+                  onClick={() => remove("projects", p.id)}
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
 
               <h3>{p.name}</h3>
 
-              {/* Status and remaining images are calculated automatically from total images and completed values */}
+              {/* Status is calculated automatically from total/completed/remaining */}
               <Status text={s.status} />
 
               <div className="pc-stat">
-                <span>Total images</span>
-                <b>{s.total ? s.total.toLocaleString() : "—"}</b>
-              </div>
-
-              <div className="pc-stat">
                 <span>Daily target</span>
-                <b>{p.target ? Number(p.target).toLocaleString() : "—"}</b>
-              </div>
-
-              <div className="pc-stat">
-                <span>Completed</span>
-                <b>{s.completed.toLocaleString()}</b>
+                <b>{s.total ? s.total.toLocaleString() : "—"}</b>
               </div>
 
               <div className="pc-stat">
@@ -1781,105 +986,70 @@ function Projects({ rows, remove, openAdd, openEdit }) {
 }
 
 /* =========================================================
-   QA & REVIEWS
-   Accuracy Report data is shown here after import.
+   QA
 ========================================================= */
 function QA({ data }) {
-  const latestDate = getLatestImportedDate(data);
-  const [period, setPeriod] = useState(() => ({
-    mode: "single",
-    start: latestDate,
-    end: latestDate
-  }));
-  const range = getDateRange(period);
+  const reviewed = data.team.reduce(
+    (s, x) => s + (Number(x.reviewed) || 0),
+    0
+  );
 
-  const allAccuracyRows = Array.isArray(data.accuracyRecords) ? data.accuracyRecords : [];
-  const accuracyRows = allAccuracyRows.filter(x => isDateInRange(x.date, range));
-
-  const totalDaily = accuracyRows.reduce((s, x) => s + (Number(x.dailyCount) || 0), 0);
-  const totalTP = accuracyRows.reduce((s, x) => s + (Number(x.tp) || 0), 0);
-  const totalFP = accuracyRows.reduce((s, x) => s + (Number(x.fp) || 0), 0);
-  const totalFN = accuracyRows.reduce((s, x) => s + (Number(x.fn) || 0), 0);
-  const totalErrors = totalFP + totalFN;
-  const denominator = totalTP + totalFP + totalFN;
-
-  const calculatedAccuracy = denominator > 0
-    ? (totalTP / denominator) * 100
-    : accuracyRows.length
-      ? accuracyRows.reduce((s, x) => s + (Number(x.accuracy) || 0), 0) / accuracyRows.length
-      : 0;
-
-  const averageScore = accuracyRows.length
-    ? accuracyRows.reduce((s, x) => s + (Number(x.score) || 0), 0) / accuracyRows.length
-    : 0;
+  const errors = data.team.reduce(
+    (s, x) => s + (Number(x.errors) || 0),
+    0
+  );
 
   return (
     <Page
       title="QA & Reviews"
-      subtitle={
-        range.start && range.end
-          ? `${range.label}: ${accuracyRows.length} Accuracy Report records${data.accuracyFile ? ` • ${data.accuracyFile}` : ""}.`
-          : "Select a specific date or date range to view the Accuracy Report."
-      }
+      subtitle="Keep annotation quality visible and actionable."
     >
-      <DateFilter value={period} onChange={setPeriod} data={data} />
-
       <div className="cards">
-        <Metric icon={ClipboardCheck} label="Total reviewed" value={totalDaily.toLocaleString()} note="Daily Count in selected period" trend={accuracyRows.length ? "Live" : "Pending"} />
-        <Metric icon={CheckCircle2} label="Accuracy" value={`${calculatedAccuracy.toFixed(1)}%`} note={accuracyRows.length ? "From Accuracy Report" : "No report in selected period"} trend={accuracyRows.length ? "Good" : "Pending"} />
-        <Metric icon={Target} label="Daily count" value={totalDaily.toLocaleString()} note="Images reported" trend={accuracyRows.length ? "Imported" : "Pending"} />
-        <Metric icon={AlertTriangle} label="Total errors" value={totalErrors.toLocaleString()} note="FP + FN in selected period" trend={totalErrors ? "Monitor" : "Clear"} />
+        <Metric
+          icon={ClipboardCheck}
+          label="Total reviewed"
+          value={reviewed.toLocaleString()}
+          note="Team review volume"
+          trend="+6.2%"
+        />
+
+        <Metric
+          icon={CheckCircle2}
+          label="Quality health"
+          value="96.8%"
+          note="Based on current issues"
+          trend="Good"
+        />
+
+        <Metric
+          icon={AlertTriangle}
+          label="Total errors"
+          value={errors}
+          note="Across active members"
+          trend="Monitor"
+        />
       </div>
 
-      <Panel title={`Review readiness — ${range.label}`}>
+      <Panel title="Review readiness">
         <div className="qa-grid">
-          <div><h2>{calculatedAccuracy.toFixed(1)}%</h2><p className="muted">Overall accuracy</p><Progress value={calculatedAccuracy} /></div>
-          <div><h2>{totalTP.toLocaleString()}</h2><p className="muted">True positives (TP)</p></div>
-          <div><h2>{totalFP.toLocaleString()}</h2><p className="muted">False positives (FP)</p></div>
-          <div><h2>{totalFN.toLocaleString()}</h2><p className="muted">False negatives (FN)</p></div>
-          <div><h2>{averageScore.toFixed(1)}</h2><p className="muted">Average score</p></div>
-          <div><h2>{data.issues.filter(x => x.status === "Open").length}</h2><p className="muted">Open QA issues</p></div>
-        </div>
-      </Panel>
-
-      <Panel title={`Accuracy Report — ${accuracyRows.length} records`}>
-        {!accuracyRows.length ? (
-          <p className="muted">No Accuracy Report data exists for <b>{range.label}</b>.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th><th>Name</th><th>Daily Count</th><th>TP</th><th>FP</th><th>FN</th>
-                  <th>Accuracy</th><th>Score</th><th>Detailed Report</th><th>Images Used</th><th>Comment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accuracyRows.map((x, i) => (
-                  <tr key={x.id || i}>
-                    <td>{x.date || "—"}</td>
-                    <td><b>{x.name}</b></td>
-                    <td>{Number(x.dailyCount || 0).toLocaleString()}</td>
-                    <td>{Number(x.tp || 0).toLocaleString()}</td>
-                    <td>{Number(x.fp || 0).toLocaleString()}</td>
-                    <td>{Number(x.fn || 0).toLocaleString()}</td>
-                    <td><b>{Number(x.accuracy || 0).toFixed(1)}%</b></td>
-                    <td><b>{Number(x.score || 0).toFixed(1)}</b></td>
-                    <td>
-                      {x.link ? (
-                        <a className="link-btn" href={x.link} target="_blank" rel="noreferrer">
-                          Open <ExternalLink size={14} />
-                        </a>
-                      ) : "—"}
-                    </td>
-                    <td>{x.imagesUsed || "—"}</td>
-                    <td>{x.comment || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div>
+            <h2>96.8%</h2>
+            <p className="muted">Overall quality health</p>
+            <Progress value={96.8} />
           </div>
-        )}
+
+          <div>
+            <h2>{reviewed.toLocaleString()}</h2>
+            <p className="muted">Reviews completed</p>
+          </div>
+
+          <div>
+            <h2>
+              {data.issues.filter(x => x.status === "Open").length}
+            </h2>
+            <p className="muted">Open QA issues</p>
+          </div>
+        </div>
       </Panel>
     </Page>
   );
@@ -1948,129 +1118,60 @@ function Issues({ rows, remove, openAdd }) {
    ANALYTICS
 ========================================================= */
 function Analytics({ data }) {
-  const latestDate = getLatestImportedDate(data);
-  const [period, setPeriod] = useState(() => ({
-    mode: "single",
-    start: latestDate,
-    end: latestDate
-  }));
-  const range = getDateRange(period);
-
-  const sheetRows = Array.isArray(data.sheetRecords)
-    ? data.sheetRecords.filter(x => isDateInRange(x.date, range))
-    : [];
-
-  const accuracyRows = Array.isArray(data.accuracyRecords)
-    ? data.accuracyRecords.filter(x => isDateInRange(x.date, range))
-    : [];
-
-  const memberMap = {};
-  sheetRows.forEach(x => {
-    const name = String(x.name || "").trim();
-    if (!name) return;
-
-    if (!memberMap[name]) {
-      memberMap[name] = { name, completed: 0, reviewed: 0 };
-    }
-
-    const worked = Number(x.worked) || 0;
-    memberMap[name].completed += worked;
-
-    if (/review/i.test(String(x.type || ""))) {
-      memberMap[name].reviewed += worked;
-    }
-  });
-
-  const productivityRows = Object.values(memberMap).sort((a, b) => b.completed - a.completed);
-  const max = Math.max(...productivityRows.map(x => x.completed), 1);
-  const maxDaily = Math.max(...accuracyRows.map(x => Number(x.dailyCount) || 0), 1);
-
-  const averageAccuracy = accuracyRows.length
-    ? accuracyRows.reduce((s, x) => s + (Number(x.accuracy) || 0), 0) / accuracyRows.length
-    : 0;
-
-  const averageScore = accuracyRows.length
-    ? accuracyRows.reduce((s, x) => s + (Number(x.score) || 0), 0) / accuracyRows.length
-    : 0;
-
-  const totalWorked = productivityRows.reduce((s, x) => s + x.completed, 0);
-  const totalTarget = data.team.reduce((s, x) => s + (Number(x.target) || 0), 0);
+  const max = Math.max(
+    ...data.team.map(x => Number(x.completed) || 0),
+    1
+  );
 
   return (
     <Page
       title="Analytics"
-      subtitle={`Productivity and accuracy analytics for ${range.label.toLowerCase()}.`}
+      subtitle="Understand productivity trends and team capacity."
     >
-      <DateFilter value={period} onChange={setPeriod} data={data} />
-
-      <Panel title={`Completed images by team member — ${range.label}`}>
-        {!productivityRows.length ? (
-          <p className="muted">No Daily Effort records exist for <b>{range.label}</b>.</p>
-        ) : (
-          <div className="bars">
-            {productivityRows.map(x => (
-              <div className="bar-row" key={x.name}>
-                <span>{x.name}</span>
-                <div><i style={{ width: `${(x.completed / max) * 100}%` }} /></div>
-                <b>{x.completed.toLocaleString()}</b>
+      <Panel title="Completed images by team member">
+        <div className="bars">
+          {data.team.map(x => (
+            <div className="bar-row" key={x.id}>
+              <span>{x.name}</span>
+              <div>
+                <i
+                  style={{
+                    width: `${((Number(x.completed) || 0) / max) * 100}%`
+                  }}
+                />
               </div>
-            ))}
-          </div>
-        )}
+              <b>{x.completed}</b>
+            </div>
+          ))}
+        </div>
       </Panel>
 
-      <div className="grid three">
+      <div className="grid two">
         <Panel title="Capacity">
-          <div className="big-number">{totalTarget ? Math.round((totalWorked / totalTarget) * 100) : 0}%</div>
-          <p className="muted">Selected-period work vs current team targets</p>
+          <div className="big-number">
+            {Math.round(
+              (data.team.reduce((s, x) => s + (Number(x.completed) || 0), 0) /
+                Math.max(
+                  1,
+                  data.team.reduce((s, x) => s + (Number(x.target) || 0), 0)
+                )) *
+                100
+            )}
+            %
+          </div>
+          <p className="muted">Team target utilization today</p>
         </Panel>
 
-        <Panel title="Accuracy health">
-          <div className="big-number">{accuracyRows.length ? `${averageAccuracy.toFixed(1)}%` : "—"}</div>
-          <p className="muted">Average accuracy from Accuracy Report</p>
-          <Progress value={averageAccuracy} />
-        </Panel>
-
-        <Panel title="Average score">
-          <div className="big-number">{accuracyRows.length ? averageScore.toFixed(1) : "—"}</div>
-          <p className="muted">Score from Accuracy Report</p>
+        <Panel title="Operational health">
+          <div className="health">
+            <CheckCircle2 />
+            <b>Healthy</b>
+            <span>
+              Most active work is progressing within target.
+            </span>
+          </div>
         </Panel>
       </div>
-
-      <Panel title={`Accuracy by team member — ${range.label}`}>
-        {!accuracyRows.length ? (
-          <p className="muted">No Accuracy Report data exists for <b>{range.label}</b>.</p>
-        ) : (
-          <div className="bars">
-            {accuracyRows.map((x, i) => {
-              const accuracy = Math.max(0, Math.min(100, Number(x.accuracy) || 0));
-              return (
-                <div className="bar-row" key={x.id || i}>
-                  <span>{x.name}</span>
-                  <div><i style={{ width: `${accuracy}%` }} /></div>
-                  <b>{accuracy.toFixed(1)}%</b>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Panel>
-
-      <Panel title={`Daily count from Accuracy Report — ${range.label}`}>
-        {!accuracyRows.length ? (
-          <p className="muted">No Accuracy Report data available.</p>
-        ) : (
-          <div className="bars">
-            {accuracyRows.map((x, i) => (
-              <div className="bar-row" key={x.id || i}>
-                <span>{x.name}</span>
-                <div><i style={{ width: `${((Number(x.dailyCount) || 0) / maxDaily) * 100}%` }} /></div>
-                <b>{Number(x.dailyCount || 0).toLocaleString()}</b>
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
     </Page>
   );
 }
@@ -2080,47 +1181,8 @@ function Analytics({ data }) {
 ========================================================= */
 function SheetImport({ data, update, notify }) {
   const [preview, setPreview] = useState([]);
-  const [accuracyPreview, setAccuracyPreview] = useState([]);
-  const [fileName, setFileName] = useState(data.sheetFile || "");
-  const [accuracyFileName, setAccuracyFileName] = useState(data.accuracyFile || "");
+  const [fileName, setFileName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [accuracyBusy, setAccuracyBusy] = useState(false);
-
-  function normalizeHeader(value) {
-    return String(value ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[%()]/g, "")
-      .replace(/[_-]+/g, " ")
-      .replace(/\s+/g, " ");
-  }
-
-  function findHeaderIndex(headers, candidates) {
-    const normalized = headers.map(normalizeHeader);
-    const wanted = candidates.map(normalizeHeader);
-    const exact = normalized.findIndex(h => wanted.includes(h));
-    if (exact >= 0) return exact;
-    return normalized.findIndex(h => wanted.some(c => h.includes(c) || c.includes(h)));
-  }
-
-  function parseNumber(value) {
-    if (value == null || value === "") return 0;
-    const cleaned = String(value)
-      .replace(/,/g, "")
-      .replace(/%/g, "")
-      .trim();
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  }
-
-  function parseAccuracyValue(value) {
-    if (value == null || value === "") return 0;
-    const text = String(value).trim();
-    const n = parseNumber(text);
-    if (text.includes("%")) return n;
-    if (n > 0 && n <= 1) return n * 100;
-    return n;
-  }
 
   function parseWorkbook(file) {
     setBusy(true);
@@ -2134,7 +1196,9 @@ function SheetImport({ data, update, notify }) {
           type: "array",
           cellDates: true
         });
+
         const ws = wb.Sheets[wb.SheetNames[0]];
+
         const rows = XLSX.utils.sheet_to_json(ws, {
           header: 1,
           defval: null,
@@ -2145,11 +1209,15 @@ function SheetImport({ data, update, notify }) {
 
         for (let c = 1; c < (rows[0]?.length || 0); c++) {
           const v = rows[0][c];
+
           if (v instanceof Date) {
             const pad = n => String(n).padStart(2, "0");
+
             dateStarts.push({
               c,
-              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
+              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(
+                v.getDate()
+              )}`
             });
           }
         }
@@ -2159,10 +1227,14 @@ function SheetImport({ data, update, notify }) {
 
         for (let r = 2; r < rows.length; r++) {
           const name = rows[r]?.[0];
+
           if (!name) continue;
 
           const cleanName = String(name).trim();
-          if (!names.includes(cleanName)) names.push(cleanName);
+
+          if (!names.includes(cleanName)) {
+            names.push(cleanName);
+          }
 
           for (const d of dateStarts) {
             const project = rows[r]?.[d.c];
@@ -2170,7 +1242,14 @@ function SheetImport({ data, update, notify }) {
             const worked = rows[r]?.[d.c + 2];
             const link = rows[r]?.[d.c + 3];
 
-            if (project == null && type == null && worked == null && link == null) continue;
+            if (
+              project == null &&
+              type == null &&
+              worked == null &&
+              link == null
+            ) {
+              continue;
+            }
 
             const ps = String(project ?? "").split("\n");
             const ts = String(type ?? "").split("\n");
@@ -2179,9 +1258,17 @@ function SheetImport({ data, update, notify }) {
 
             ps.forEach((p, i) => {
               const text = p.trim();
+
               if (!text) return;
+
               const raw = nums[i] ?? nums[nums.length - 1] ?? "";
-              const n = parseNumber(raw);
+
+              const n =
+                Number(
+                  String(raw)
+                    .replace(/,/g, "")
+                    .replace(/--|---/g, "")
+                ) || 0;
 
               records.push({
                 id: `${d.date}-${cleanName}-${records.length}`,
@@ -2196,19 +1283,53 @@ function SheetImport({ data, update, notify }) {
           }
         }
 
-        const workDates = [...new Set(records.map(x => x.date).filter(Boolean))].sort();
-        const today = workDates[workDates.length - 1] || new Date().toISOString().slice(0, 10);
+        const workDates = [
+          ...new Set(records.map(x => x.date).filter(Boolean))
+        ].sort();
+
+        const today =
+          workDates[workDates.length - 1] ||
+          new Date().toISOString().slice(0, 10);
+
         const todayRows = records.filter(
-          x => x.date === today && !["Saturday", "Sunday", "On Leave"].includes(x.project)
+          x =>
+            x.date === today &&
+            !["Saturday", "Sunday", "On Leave"].includes(x.project)
         );
 
+        /* TEAM TOTALS */
         const team = names.map((name, i) => {
           const person = todayRows.filter(x => x.name === name);
-          const projectNames = [...new Set(person.map(x => getConfiguredProjectName(x.project)).filter(Boolean))];
-          const target = projectNames.reduce((sum, project) => sum + (projectTargets[project] || 0), 0);
-          const completed = person.reduce((s, x) => s + (Number(x.worked) || 0), 0);
-          const reviewed = person.filter(x => /review/i.test(x.type)).reduce((s, x) => s + (Number(x.worked) || 0), 0);
-          const leave = records.some(x => x.date === today && x.name === name && x.project === "On Leave");
+
+          const projectNames = [
+            ...new Set(
+              person
+                .map(x => getConfiguredProjectName(x.project))
+                .filter(Boolean)
+            )
+          ];
+
+          const target = projectNames.reduce(
+            (sum, project) =>
+              sum + (projectTargets[project] || 0),
+            0
+          );
+
+          const completed = person.reduce(
+            (s, x) => s + (Number(x.worked) || 0),
+            0
+          );
+
+          const reviewed = person
+            .filter(x => /review/i.test(x.type))
+            .reduce((s, x) => s + (Number(x.worked) || 0), 0);
+
+          const leave = records.some(
+            x =>
+              x.date === today &&
+              x.name === name &&
+              x.project === "On Leave"
+          );
 
           return {
             id: 1000 + i,
@@ -2222,48 +1343,53 @@ function SheetImport({ data, update, notify }) {
           };
         });
 
+        /* PROJECT TOTALS */
         const projectMap = {};
+
         Object.entries(projectTargets).forEach(([name, target]) => {
-          const existing = data.projects?.find(p => String(p.name).toLowerCase() === String(name).toLowerCase());
           projectMap[name] = {
             completed: 0,
-            target,
-            totalImages: Math.max(0, Number(existing?.totalImages ?? existing?.total ?? existing?.target) || target),
-            deadline: existing?.deadline || ""
+            target
           };
         });
 
         todayRows.forEach(x => {
           const configuredName = getConfiguredProjectName(x.project);
+
           if (!configuredName) return;
+
           if (!projectMap[configuredName]) {
             projectMap[configuredName] = {
               completed: 0,
-              target: projectTargets[configuredName] || 0,
-              totalImages: Math.max(0, Number(projectTargets[configuredName]) || 0),
-              deadline: ""
+              target: projectTargets[configuredName] || 0
             };
           }
+
           projectMap[configuredName].completed += Number(x.worked) || 0;
         });
 
-        const projects = Object.entries(projectMap).map(([name, v], i) => {
-          const target = Number(v.target) || 0;
-          const totalImages = Math.max(0, Number(v.totalImages ?? target) || 0);
-          const completed = Math.max(0, Math.min(totalImages, Number(v.completed) || 0));
-          const remaining = Math.max(0, totalImages - completed);
-          return {
-            id: 2000 + i,
-            name,
-            target,
-            totalImages,
-            total: totalImages,
-            completed,
-            remaining,
-            status: getProjectStatus(totalImages, completed, remaining),
-            deadline: v.deadline || ""
-          };
-        });
+        const projects = Object.entries(projectMap).map(
+          ([name, v], i) => {
+            const target = Number(v.target) || 0;
+            const completed = Math.max(0, Number(v.completed) || 0);
+            const remaining = Math.max(0, target - completed);
+
+            return {
+              id: 2000 + i,
+              name,
+              target,
+              total: target,
+              completed,
+              remaining,
+              status: getProjectStatus(
+                target,
+                completed,
+                remaining
+              ),
+              deadline: ""
+            };
+          }
+        );
 
         update({
           ...data,
@@ -2275,10 +1401,13 @@ function SheetImport({ data, update, notify }) {
         });
 
         setPreview(records.slice(0, 25));
+
         notify(`Imported ${records.length} work records`);
       } catch (err) {
         console.error(err);
-        alert("Could not read this Excel file. Please use .xlsx format.");
+        alert(
+          "Could not read this Excel file. Please use .xlsx format."
+        );
       } finally {
         setBusy(false);
       }
@@ -2287,193 +1416,51 @@ function SheetImport({ data, update, notify }) {
     reader.readAsArrayBuffer(file);
   }
 
-  function parseAccuracyWorkbook(file) {
-    setAccuracyBusy(true);
-    setAccuracyFileName(file.name);
-
-    const reader = new FileReader();
-
-    reader.onload = e => {
-      try {
-        const wb = XLSX.read(e.target.result, {
-          type: "array",
-          cellDates: true
-        });
-
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, {
-          header: 1,
-          defval: null,
-          raw: true
-        });
-
-        if (!rows.length) {
-          alert("The Accuracy Report is empty.");
-          return;
-        }
-
-        // Find the header row even if the sheet has a title above it.
-        let headerRowIndex = -1;
-        let headers = [];
-
-        for (let r = 0; r < Math.min(rows.length, 10); r++) {
-          const candidate = rows[r] || [];
-          const normalized = candidate.map(normalizeHeader);
-          const hasName = normalized.some(h => ["name", "member", "team member", "employee name"].includes(h));
-          const hasAccuracy = normalized.some(h => h.includes("accuracy"));
-          const hasTP = normalized.some(h => h === "tp" || h.includes("true positive"));
-          if (hasName && (hasAccuracy || hasTP)) {
-            headerRowIndex = r;
-            headers = candidate;
-            break;
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          headerRowIndex = 0;
-          headers = rows[0] || [];
-        }
-
-        const dateIndex = findHeaderIndex(headers, [
-          "date", "report date", "accuracy date", "day"
-        ]);
-        const nameIndex = findHeaderIndex(headers, [
-          "name", "member", "team member", "employee name", "employee"
-        ]);
-        const dailyCountIndex = findHeaderIndex(headers, [
-          "daily count", "dailycount", "count", "daily output", "images count", "daily images"
-        ]);
-        const tpIndex = findHeaderIndex(headers, [
-          "tp", "true positive", "true positives"
-        ]);
-        const fpIndex = findHeaderIndex(headers, [
-          "fp", "false positive", "false positives"
-        ]);
-        const fnIndex = findHeaderIndex(headers, [
-          "fn", "false negative", "false negatives"
-        ]);
-        const accuracyIndex = findHeaderIndex(headers, [
-          "accuracy", "accuracy ", "accuracy percent", "accuracy percentage"
-        ]);
-        const scoreIndex = findHeaderIndex(headers, [
-          "score", "qa score", "quality score"
-        ]);
-        const linkIndex = findHeaderIndex(headers, [
-          "link to the detailed report", "detailed report", "report link", "link", "detailed report link"
-        ]);
-        const imagesUsedIndex = findHeaderIndex(headers, [
-          "images used for calculating accuracy", "images used", "images used for accuracy", "accuracy images", "images"
-        ]);
-        const commentIndex = findHeaderIndex(headers, [
-          "comment", "comments", "remark", "remarks", "note", "notes"
-        ]);
-
-        if (nameIndex === -1) {
-          alert(`Could not find the Name column. Detected headers: ${headers.filter(Boolean).join(" | ")}`);
-          return;
-        }
-
-        if (dailyCountIndex === -1 && tpIndex === -1 && accuracyIndex === -1) {
-          alert(`Could not find Accuracy Report data columns. Detected headers: ${headers.filter(Boolean).join(" | ")}`);
-          return;
-        }
-
-        const records = [];
-
-        for (let r = headerRowIndex + 1; r < rows.length; r++) {
-          const row = rows[r] || [];
-          const name = String(row[nameIndex] ?? "").trim();
-          if (!name) continue;
-
-          const date = dateIndex >= 0 ? normalizeDateValue(row[dateIndex]) : "";
-          const dailyCount = dailyCountIndex >= 0 ? parseNumber(row[dailyCountIndex]) : 0;
-          const tp = tpIndex >= 0 ? parseNumber(row[tpIndex]) : 0;
-          const fp = fpIndex >= 0 ? parseNumber(row[fpIndex]) : 0;
-          const fn = fnIndex >= 0 ? parseNumber(row[fnIndex]) : 0;
-
-          let accuracy = accuracyIndex >= 0 ? parseAccuracyValue(row[accuracyIndex]) : 0;
-          if (!accuracy && tp + fp + fn > 0) {
-            accuracy = (tp / (tp + fp + fn)) * 100;
-          }
-
-          const score = scoreIndex >= 0 ? parseNumber(row[scoreIndex]) : 0;
-          const link = linkIndex >= 0 ? String(row[linkIndex] ?? "").trim() : "";
-          const imagesUsed = imagesUsedIndex >= 0 ? String(row[imagesUsedIndex] ?? "").trim() : "";
-          const comment = commentIndex >= 0 ? String(row[commentIndex] ?? "").trim() : "";
-
-          records.push({
-            id: `accuracy-${Date.now()}-${r}`,
-            date,
-            name,
-            dailyCount,
-            tp,
-            fp,
-            fn,
-            accuracy: Math.max(0, Math.min(100, accuracy)),
-            score,
-            link,
-            imagesUsed,
-            comment
-          });
-        }
-
-        if (!records.length) {
-          alert("No team member records were found in the Accuracy Report.");
-          return;
-        }
-
-        update({
-          ...data,
-          accuracyRecords: records,
-          accuracyFile: file.name,
-          accuracyLastSync: new Date().toISOString()
-        });
-
-        setAccuracyPreview(records.slice(0, 25));
-        notify(`Imported Accuracy Report for ${records.length} team members`);
-      } catch (err) {
-        console.error(err);
-        alert("Could not read this Accuracy Report. Please use .xlsx format and check the column names.");
-      } finally {
-        setAccuracyBusy(false);
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-  }
-
-  const storedAccuracy = accuracyPreview.length
-    ? accuracyPreview
-    : data.accuracyRecords || [];
-
   return (
     <Page
       title="Sheet Import"
-      subtitle="Import your Daily Effort Sheet and Accuracy Report. Both sources will update the dashboard automatically."
+      subtitle="Import your existing Daily Effort Sheet and use it as the dashboard data source."
     >
       <div className="grid two">
-        <Panel title="Daily Effort Sheet">
+        <Panel title="Import Excel / Google Sheets export">
           <div className="import-box">
             <Upload size={28} />
-            <h3>{busy ? "Importing..." : "Upload your .xlsx file"}</h3>
-            <p>Use Google Sheets → File → Download → Microsoft Excel (.xlsx).</p>
+
+            <h3>
+              {busy ? "Importing..." : "Upload your .xlsx file"}
+            </h3>
+
+            <p>
+              Use Google Sheets → File → Download → Microsoft Excel (.xlsx).
+            </p>
+
             <label className="primary upload-label">
               <Upload size={17} />
               Choose Excel file
+
               <input
                 type="file"
                 accept=".xlsx,.xls"
                 hidden
-                onChange={e => e.target.files?.[0] && parseWorkbook(e.target.files[0])}
+                onChange={e =>
+                  e.target.files?.[0] &&
+                  parseWorkbook(e.target.files[0])
+                }
               />
             </label>
+
             {fileName && (
               <div className="import-success">
                 <CheckCircle2 size={17} />
+
                 <span>
                   <b>{fileName}</b>
+
                   <small>
-                    Last imported: {data.sheetLastSync ? new Date(data.sheetLastSync).toLocaleString() : "just now"}
+                    Last imported:{" "}
+                    {data.sheetLastSync
+                      ? new Date(data.sheetLastSync).toLocaleString()
+                      : "just now"}
                   </small>
                 </span>
               </div>
@@ -2481,117 +1468,69 @@ function SheetImport({ data, update, notify }) {
           </div>
         </Panel>
 
-        <Panel title="Accuracy Report">
-          <div className="import-box">
-            <CheckCircle2 size={28} />
-            <h3>{accuracyBusy ? "Importing Accuracy Report..." : "Upload Accuracy Report"}</h3>
-            <p>
-              Required fields: Name, Daily Count, TP, FP, FN, Accuracy(%), Score, Detailed Report Link, Images Used and Comment.
-            </p>
-            <label className="primary upload-label">
-              <Upload size={17} />
-              Choose Accuracy Excel
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                hidden
-                onChange={e => e.target.files?.[0] && parseAccuracyWorkbook(e.target.files[0])}
-              />
-            </label>
-            {accuracyFileName && (
-              <div className="import-success">
-                <CheckCircle2 size={17} />
-                <span>
-                  <b>{accuracyFileName}</b>
-                  <small>
-                    Last imported: {data.accuracyLastSync ? new Date(data.accuracyLastSync).toLocaleString() : "just now"}
-                  </small>
-                </span>
-              </div>
-            )}
+        <Panel title="Detected sheet structure">
+          <div className="structure-list">
+            <div>
+              <b>Name</b>
+              <span>Team member</span>
+            </div>
+            <div>
+              <b>Project</b>
+              <span>Project worked on</span>
+            </div>
+            <div>
+              <b>Annotation/Review</b>
+              <span>Work type</span>
+            </div>
+            <div>
+              <b>Total images worked</b>
+              <span>Daily output</span>
+            </div>
+            <div>
+              <b>Link to the range</b>
+              <span>Work/range link</span>
+            </div>
           </div>
         </Panel>
       </div>
 
-      <div className="grid two">
-        <Panel title="Daily Effort sheet structure">
-          <div className="structure-list">
-            <div><b>Name</b><span>Team member</span></div>
-            <div><b>Project</b><span>Project worked on</span></div>
-            <div><b>Annotation/Review</b><span>Work type</span></div>
-            <div><b>Total images worked</b><span>Daily output</span></div>
-            <div><b>Link to the range</b><span>Work/range link</span></div>
-          </div>
-        </Panel>
-
-        <Panel title="Accuracy Report structure">
-          <div className="structure-list">
-            <div><b>Name</b><span>Team member</span></div>
-            <div><b>Daily Count</b><span>Daily images completed</span></div>
-            <div><b>TP / FP / FN</b><span>Accuracy counts</span></div>
-            <div><b>Accuracy(%) / Score</b><span>Quality result</span></div>
-            <div><b>Detailed Report / Images / Comment</b><span>Supporting QA details</span></div>
-          </div>
-        </Panel>
-      </div>
-
-      <Panel title={`Imported daily records ${data.sheetRecords?.length ? `(${data.sheetRecords.length})` : ""}`}>
+      <Panel
+        title={`Imported records ${
+          data.sheetRecords?.length
+            ? `(${data.sheetRecords.length})`
+            : ""
+        }`}
+      >
         {preview.length === 0 && !data.sheetRecords?.length ? (
-          <p className="muted">Upload the Daily Effort Excel file to preview and sync daily work.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Date</th><th>Name</th><th>Project</th><th>Type</th><th>Images worked</th></tr>
-              </thead>
-              <tbody>
-                {(preview.length ? preview : data.sheetRecords.slice(0, 25)).map((x, i) => (
-                  <tr key={x.id || i}>
-                    <td>{x.date}</td>
-                    <td><b>{x.name}</b></td>
-                    <td>{x.project}</td>
-                    <td>{x.type}</td>
-                    <td><b>{Number(x.worked || 0).toLocaleString()}</b></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
-
-      <Panel title={`Imported Accuracy records ${storedAccuracy.length ? `(${storedAccuracy.length})` : ""}`}>
-        {!storedAccuracy.length ? (
-          <p className="muted">Upload the Accuracy Report to preview the team accuracy data.</p>
+          <p className="muted">
+            Upload the Excel file to preview and sync your daily work.
+          </p>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Date</th><th>Name</th><th>Daily Count</th><th>TP</th><th>FP</th><th>FN</th>
-                  <th>Accuracy</th><th>Score</th><th>Detailed Report</th><th>Images Used</th><th>Comment</th>
+                  <th>Date</th>
+                  <th>Name</th>
+                  <th>Project</th>
+                  <th>Type</th>
+                  <th>Images worked</th>
                 </tr>
               </thead>
+
               <tbody>
-                {storedAccuracy.map((x, i) => (
+                {(preview.length
+                  ? preview
+                  : data.sheetRecords.slice(0, 25)
+                ).map((x, i) => (
                   <tr key={x.id || i}>
-                    <td>{x.date || "—"}</td>
+                    <td>{x.date}</td>
                     <td><b>{x.name}</b></td>
-                    <td>{Number(x.dailyCount || 0).toLocaleString()}</td>
-                    <td>{Number(x.tp || 0).toLocaleString()}</td>
-                    <td>{Number(x.fp || 0).toLocaleString()}</td>
-                    <td>{Number(x.fn || 0).toLocaleString()}</td>
-                    <td><b>{Number(x.accuracy || 0).toFixed(1)}%</b></td>
-                    <td><b>{Number(x.score || 0).toFixed(1)}</b></td>
+                    <td>{x.project}</td>
+                    <td>{x.type}</td>
                     <td>
-                      {x.link ? (
-                        <a className="link-btn" href={x.link} target="_blank" rel="noreferrer">
-                          Open <ExternalLink size={14} />
-                        </a>
-                      ) : "—"}
+                      <b>{Number(x.worked || 0).toLocaleString()}</b>
                     </td>
-                    <td>{x.imagesUsed || "—"}</td>
-                    <td>{x.comment || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2616,7 +1555,7 @@ function SettingsPage({ exportData, importData }) {
         <div className="settings-row">
           <div>
             <b>Export backup</b>
-            <p>Download all team, project, Accuracy Report and issue data as JSON.</p>
+            <p>Download all team, project and issue data as JSON.</p>
           </div>
 
           <button className="secondary" onClick={exportData}>
@@ -2628,7 +1567,7 @@ function SettingsPage({ exportData, importData }) {
         <div className="settings-row">
           <div>
             <b>Import backup</b>
-            <p>Restore a previously exported dashboard backup, including Accuracy Report data.</p>
+            <p>Restore a previously exported dashboard backup.</p>
           </div>
 
           <label className="secondary">
@@ -2647,19 +1586,13 @@ function SettingsPage({ exportData, importData }) {
           <div>
             <b>Storage</b>
             <p>
-              {storageStatus === "online"
-                ? "Dashboard data is synchronized with the online Supabase database."
-                : storageStatus === "connecting"
-                ? "Connecting to the online database..."
-                : storageStatus === "error"
-                ? "Online storage is configured but could not be reached. Local backup remains active."
-                : "Online storage is not configured yet, so this browser is using localStorage."}
+              Data is currently stored in this browser using localStorage.
             </p>
           </div>
 
-          <span className={"status " + (storageStatus === "online" ? "active" : storageStatus === "error" ? "away" : "pending")}>
+          <span className="status active">
             <i />
-            {storageStatus === "online" ? "Online" : storageStatus === "connecting" ? "Connecting" : storageStatus === "error" ? "Error" : "Local"}
+            Local
           </span>
         </div>
       </Panel>
@@ -2696,99 +1629,10 @@ function Page({
   );
 }
 
-function ProjectEditModal({ project, onClose, onSubmit }) {
-  const stats = getProjectStats(project);
-
-  return (
-    <div className="modal-bg">
-      <div className="modal">
-        <div className="modal-head">
-          <div>
-            <p className="eyebrow">EDIT PROJECT</p>
-            <h2>Edit project</h2>
-          </div>
-
-          <button className="icon-btn" type="button" onClick={onClose} aria-label="Close">
-            <X />
-          </button>
-        </div>
-
-        <form onSubmit={onSubmit}>
-          <label>
-            Project name
-            <input
-              name="name"
-              defaultValue={project.name || ""}
-              required
-            />
-          </label>
-
-          <label>
-            Total number of images
-            <input
-              name="totalImages"
-              type="number"
-              min="0"
-              defaultValue={stats.total}
-              required
-            />
-          </label>
-
-          <label>
-            Daily target
-            <input
-              name="target"
-              type="number"
-              min="0"
-              defaultValue={project.target || 0}
-              required
-            />
-          </label>
-
-          <label>
-            Completed
-            <input
-              name="completed"
-              type="number"
-              min="0"
-              max={stats.total}
-              defaultValue={stats.completed}
-              required
-            />
-          </label>
-
-          <label>
-            Deadline
-            <input
-              name="deadline"
-              type="date"
-              defaultValue={project.deadline || ""}
-            />
-          </label>
-
-          <p className="muted project-edit-note">
-            Remaining images and status are calculated automatically from total images and completed values.
-          </p>
-
-          <div className="modal-actions">
-            <button type="button" className="secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button className="primary" type="submit">
-              <Save size={16} />
-              Save changes
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 function Modal({ type, onClose, onSubmit }) {
   const labels = {
     team: ["Add team member", "Name", "Role", "Target", "Completed"],
-    project: ["Add project", "Project name", "Total number of images", "Daily target", "Completed", "Status"],
+    project: ["Add project", "Project name", "Daily target", "Completed today", "Status"],
     issue: ["Log issue", "Issue type", "Project", "Owner", "Severity"]
   };
 
@@ -2859,27 +1703,16 @@ function Modal({ type, onClose, onSubmit }) {
               <label>
                 {l[2]}
                 <input
-                  name="totalImages"
+                  name="target"
                   type="number"
                   min="0"
                   required
-                  placeholder="e.g. 5000, 10000, 25000"
+                  placeholder="e.g. 100, 350, 600, 800, 1000"
                 />
               </label>
 
               <label>
                 {l[3]}
-                <input
-                  name="target"
-                  type="number"
-                  min="0"
-                  required
-                  placeholder="e.g. 350, 800, 1000"
-                />
-              </label>
-
-              <label>
-                {l[4]}
                 <input
                   name="completed"
                   type="number"
@@ -2888,7 +1721,14 @@ function Modal({ type, onClose, onSubmit }) {
                 />
               </label>
 
-              <p className="muted project-edit-note">Remaining images and status are calculated automatically from total images and completed images.</p>
+              <label>
+                {l[4]}
+                <select name="status">
+                  <option>Pending</option>
+                  <option>In Progress</option>
+                  <option>Completed</option>
+                </select>
+              </label>
 
               <label>
                 Deadline
