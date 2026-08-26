@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createRoot } from "react-dom/client";
 import {
@@ -8,6 +8,7 @@ import {
   ExternalLink, Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck
 } from "lucide-react";
 import "./styles.css";
+import { supabase, isSupabaseConfigured } from "./supabaseClient";
 
 /* =========================================================
    PROJECT TARGETS
@@ -93,6 +94,7 @@ const seed = {
   accuracyRecords: [],
   accuracyFile: "",
   accuracyLastSync: "",
+  teamDeleted: [],
   issues: [    { id: 1, type: "Missed labels", project: "PCI_Annotations", owner: "Priya", severity: "High", status: "Open", date: "2026-08-11" },
     { id: 2, type: "Wrong prediction", project: "hase2_july_data_1", owner: "Kiran", severity: "Medium", status: "Open", date: "2026-08-11" },
     { id: 3, type: "Label inconsistency", project: "PCI_Annotations", owner: "Rahul", severity: "Low", status: "Resolved", date: "2026-08-10" }
@@ -126,7 +128,8 @@ function loadData() {
       accuracyLastSync: saved.accuracyLastSync || "",
       sheetFile: saved.sheetFile || "",
       sheetLastSync: saved.sheetLastSync || "",
-      issues: Array.isArray(saved.issues) ? saved.issues : seed.issues
+      issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
+      teamDeleted: Array.isArray(saved.teamDeleted) ? saved.teamDeleted : []
     };
   } catch {
     return seed;
@@ -135,6 +138,67 @@ function loadData() {
 
 function saveData(data) {
   localStorage.setItem("annotatepro-data", JSON.stringify(data));
+}
+
+async function loadOnlineData() {
+  if (!isSupabaseConfigured || !supabase) return null;
+
+  const { data: row, error } = await supabase
+    .from("dashboard_state")
+    .select("data")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Supabase load failed:", error);
+    return null;
+  }
+
+  if (!row?.data) return null;
+
+  const saved = row.data;
+  return {
+    ...seed,
+    ...saved,
+    team: Array.isArray(saved.team) ? saved.team : seed.team,
+    projects: Array.isArray(saved.projects)
+      ? saved.projects.map(p => {
+          const totalImages = Math.max(0, Number(p.totalImages ?? p.total ?? p.target) || 0);
+          const normalized = { ...p, totalImages };
+          const s = getProjectStats(normalized);
+          return { ...normalized, ...s, totalImages, target: Math.max(0, Number(p.target) || 0), total: totalImages };
+        })
+      : seed.projects,
+    sheetRecords: Array.isArray(saved.sheetRecords)
+      ? saved.sheetRecords.map(r => ({ ...r, date: normalizeDateValue(r.date) }))
+      : [],
+    accuracyRecords: Array.isArray(saved.accuracyRecords)
+      ? saved.accuracyRecords.map(r => ({ ...r, date: normalizeDateValue(r.date) }))
+      : [],
+    accuracyFile: saved.accuracyFile || "",
+    accuracyLastSync: saved.accuracyLastSync || "",
+    sheetFile: saved.sheetFile || "",
+    sheetLastSync: saved.sheetLastSync || "",
+    issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
+    teamDeleted: Array.isArray(saved.teamDeleted) ? saved.teamDeleted : []
+  };
+}
+
+async function saveOnlineData(data) {
+  if (!isSupabaseConfigured || !supabase) return;
+
+  const { error } = await supabase
+    .from("dashboard_state")
+    .upsert({
+      id: 1,
+      data,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "id" });
+
+  if (error) {
+    console.error("Supabase save failed:", error);
+    throw error;
+  }
 }
 
 function getConfiguredProjectName(project) {
@@ -348,6 +412,9 @@ function DateFilter({ value, onChange, data }) {
 function App() {
   const [data, setData] = useState(loadData);
   const [page, setPage] = useState("dashboard");
+  const [storageStatus, setStorageStatus] = useState(
+    isSupabaseConfigured ? "connecting" : "local"
+  );
   const [query, setQuery] = useState("");
   const [sidebar, setSidebar] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -355,9 +422,50 @@ function App() {
   const [editingProject, setEditingProject] = useState(null);
   const [toast, setToast] = useState("");
 
+  useEffect(() => {
+    let active = true;
+
+    async function syncFromCloud() {
+      if (!isSupabaseConfigured) {
+        setStorageStatus("local");
+        return;
+      }
+
+      const cloudData = await loadOnlineData();
+
+      if (!active) return;
+
+      if (cloudData) {
+        setData(cloudData);
+        saveData(cloudData);
+        setStorageStatus("online");
+      } else {
+        // First online run: publish the existing local dashboard data.
+        try {
+          await saveOnlineData(data);
+          if (active) setStorageStatus("online");
+        } catch {
+          if (active) setStorageStatus("error");
+        }
+      }
+    }
+
+    syncFromCloud();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const update = next => {
     setData(next);
     saveData(next);
+
+    if (isSupabaseConfigured) {
+      saveOnlineData(next)
+        .then(() => setStorageStatus("online"))
+        .catch(() => setStorageStatus("error"));
+    }
   };
 
   const notify = msg => {
@@ -435,6 +543,11 @@ function App() {
           status: "Active"
         }
       ];
+
+      next.teamDeleted = (data.teamDeleted || []).filter(
+        deletedName =>
+          String(deletedName).toLowerCase() !== name.toLowerCase()
+      );
     } else if (addType === "project") {
       const name = String(f.get("name") || "").trim();
       const totalImages = Math.max(0, Number(f.get("totalImages") || 0));
@@ -1021,9 +1134,16 @@ function Team({ rows, data, update, notify, openAdd }) {
       : [];
 
     const edits = data.teamEdits || {};
+    const deleted = new Set(
+      Array.isArray(data.teamDeleted)
+        ? data.teamDeleted.map(x => String(x).trim().toLowerCase())
+        : []
+    );
 
     if (!records.length) {
-      return rows.map((x) => {
+      return rows
+        .filter(x => !deleted.has(String(x.name || "").trim().toLowerCase()))
+        .map((x) => {
         const base = {
           id: `member-${x.id}`,
           name: x.name,
@@ -1114,11 +1234,13 @@ function Team({ rows, data, update, notify, openAdd }) {
       }
     });
 
-    return result.map((row) => ({
-      ...row,
-      ...(edits[getEditKey(row)] || {})
-    }));
-  }, [data.sheetRecords, data.teamEdits, rows]);
+    return result
+      .filter(row => !deleted.has(String(row.name || "").trim().toLowerCase()))
+      .map((row) => ({
+        ...row,
+        ...(edits[getEditKey(row)] || {})
+      }));
+  }, [data.sheetRecords, data.teamEdits, data.teamDeleted, rows]);
 
   const imported =
     Array.isArray(data.sheetRecords) &&
@@ -1231,6 +1353,42 @@ function Team({ rows, data, update, notify, openAdd }) {
     setEditingId(null);
     setEditForm({});
     notify("Team record updated");
+  }
+
+  function deleteMember(row) {
+    const name = String(row.name || "").trim();
+    if (!name) return;
+
+    if (!window.confirm(`Delete ${name} from the team? This will remove all of this member's team records from the dashboard.`)) {
+      return;
+    }
+
+    const key = name.toLowerCase();
+    const nextDeleted = [
+      ...(Array.isArray(data.teamDeleted) ? data.teamDeleted : []),
+      key
+    ].filter((value, index, arr) => arr.indexOf(value) === index);
+
+    const nextTeam = (Array.isArray(data.team) ? data.team : []).filter(
+      member => String(member.name || "").trim().toLowerCase() !== key
+    );
+
+    const nextEdits = Object.fromEntries(
+      Object.entries(data.teamEdits || {}).filter(([editKey, value]) => {
+        const editName = String(value?.name || "").trim().toLowerCase();
+        return editName !== key && !editKey.startsWith(`${name.toLowerCase()}|||`);
+      })
+    );
+
+    update({
+      ...data,
+      team: nextTeam,
+      teamDeleted: nextDeleted,
+      teamEdits: nextEdits
+    });
+
+    if (editingId === row.id) cancelEdit();
+    notify(`${name} deleted`);
   }
 
   function inputStyle() {
@@ -1505,6 +1663,20 @@ function Team({ rows, data, update, notify, openAdd }) {
                         >
                           <Pencil size={15} />
                           Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          className="delete"
+                          style={{
+                            padding: "7px 9px",
+                            minWidth: "auto"
+                          }}
+                          title="Delete this member"
+                          aria-label={`Delete ${x.name}`}
+                          onClick={() => deleteMember(x)}
+                        >
+                          <Trash2 size={15} />
                         </button>
                       )}
                     </td>
@@ -2475,13 +2647,19 @@ function SettingsPage({ exportData, importData }) {
           <div>
             <b>Storage</b>
             <p>
-              Data is currently stored in this browser using localStorage.
+              {storageStatus === "online"
+                ? "Dashboard data is synchronized with the online Supabase database."
+                : storageStatus === "connecting"
+                ? "Connecting to the online database..."
+                : storageStatus === "error"
+                ? "Online storage is configured but could not be reached. Local backup remains active."
+                : "Online storage is not configured yet, so this browser is using localStorage."}
             </p>
           </div>
 
-          <span className="status active">
+          <span className={"status " + (storageStatus === "online" ? "active" : storageStatus === "error" ? "away" : "pending")}>
             <i />
-            Local
+            {storageStatus === "online" ? "Online" : storageStatus === "connecting" ? "Connecting" : storageStatus === "error" ? "Error" : "Local"}
           </span>
         </div>
       </Panel>
