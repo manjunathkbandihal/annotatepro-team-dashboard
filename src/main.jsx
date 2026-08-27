@@ -591,27 +591,49 @@ function Login({ onLoggedIn }) {
    PROFILE
 ========================================================= */
 
-async function getProfile(user) {
+async function getProfile(user, options = {}) {
   if (!supabase || !user) {
-    return null;
+    return {
+      profile: null,
+      error: new Error("Supabase or authenticated user is unavailable.")
+    };
   }
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, full_name, role")
-    .eq("id", user.id)
-    .single();
+  const attempts = options.retry === false ? 1 : 3;
+  let lastError = null;
 
-  if (error) {
-    console.error(
-      "Profile load error:",
-      error
-    );
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, role")
+      .eq("id", user.id)
+      .maybeSingle();
 
-    return null;
+    if (!error && data) {
+      return {
+        profile: data,
+        error: null
+      };
+    }
+
+    if (error) {
+      lastError = error;
+      console.error("Profile load error:", error);
+    } else if (!data) {
+      lastError = new Error(
+        `No dashboard profile was returned for authenticated user ${user.id}.`
+      );
+    }
+
+    if (attempt < attempts - 1) {
+      await new Promise(resolve => setTimeout(resolve, 350));
+    }
   }
 
-  return data;
+  return {
+    profile: null,
+    error: lastError
+  };
 }
 
 /* =========================================================
@@ -624,6 +646,9 @@ function App() {
 
   const [profile, setProfile] =
     useState(null);
+
+  const [profileError, setProfileError] =
+    useState("");
 
   const [data, setData] =
     useState(null);
@@ -677,13 +702,19 @@ function App() {
       setSession(currentSession);
 
       if (currentSession?.user) {
-        const p = await getProfile(
+        const result = await getProfile(
           currentSession.user
         );
 
         if (!mounted) return;
 
-        setProfile(p);
+        setProfile(result.profile);
+        setProfileError(
+          result.error?.message || ""
+        );
+      } else {
+        setProfile(null);
+        setProfileError("");
       }
 
       setLoading(false);
@@ -700,15 +731,19 @@ function App() {
         setSession(newSession);
 
         if (newSession?.user) {
-          const p = await getProfile(
+          const result = await getProfile(
             newSession.user
           );
 
           if (!mounted) return;
 
-          setProfile(p);
+          setProfile(result.profile);
+          setProfileError(
+            result.error?.message || ""
+          );
         } else {
           setProfile(null);
+          setProfileError("");
           setData(null);
         }
       }
@@ -807,6 +842,7 @@ function App() {
 
     setSession(null);
     setProfile(null);
+    setProfileError("");
     setData(null);
   }
 
@@ -1366,9 +1402,33 @@ function App() {
             </h2>
 
             <p className="muted">
-              Your Supabase user exists,
-              but no dashboard profile
-              was found.
+              Your Supabase user exists, but the
+              dashboard could not read the matching
+              profile from the <b>profiles</b> table.
+            </p>
+
+            {profileError && (
+              <div
+                style={{
+                  margin: "16px 0",
+                  padding: "12px",
+                  borderRadius: "10px",
+                  background: "#fff7ed",
+                  color: "#9a3412",
+                  fontSize: "13px",
+                  lineHeight: 1.5,
+                  wordBreak: "break-word"
+                }}
+              >
+                <strong>Profile read error:</strong>{" "}
+                {profileError}
+              </div>
+            )}
+
+            <p className="muted" style={{ fontSize: "13px" }}>
+              If the profile row exists in Supabase, this usually
+              means the table's Row Level Security policy is not
+              allowing the signed-in user to read their own row.
             </p>
 
             <button
