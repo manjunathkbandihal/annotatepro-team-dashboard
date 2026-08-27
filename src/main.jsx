@@ -443,6 +443,7 @@ function canManageIssues(role) {
 function Login({ onLoggedIn }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -478,111 +479,459 @@ function Login({ onLoggedIn }) {
   }
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        background:
+          "radial-gradient(circle at 15% 15%, rgba(99,102,241,0.16), transparent 34%), radial-gradient(circle at 85% 85%, rgba(14,165,233,0.13), transparent 32%), #f7f9fc",
+        position: "relative",
+        overflow: "hidden"
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background:
+            "linear-gradient(135deg, rgba(255,255,255,0.78), rgba(255,255,255,0.18))"
+        }}
+      />
+
       <div
         style={{
           minHeight: "100vh",
+          width: "100%",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: "24px",
-          width: "100%"
+          padding: "32px 20px",
+          position: "relative",
+          zIndex: 1
         }}
       >
         <div
-          className="panel"
+          className="annotatepro-login-grid"
           style={{
             width: "100%",
-            maxWidth: "430px"
+            maxWidth: "980px",
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.05fr) minmax(360px, 0.95fr)",
+            borderRadius: "28px",
+            overflow: "hidden",
+            background: "rgba(255,255,255,0.94)",
+            border: "1px solid rgba(148,163,184,0.22)",
+            boxShadow: "0 30px 80px rgba(15,23,42,0.14)"
           }}
         >
           <div
             style={{
-              textAlign: "center",
-              marginBottom: "28px"
+              padding: "52px",
+              minHeight: "590px",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              background:
+                "linear-gradient(145deg, #111827 0%, #1e293b 58%, #312e81 100%)",
+              color: "#ffffff",
+              position: "relative",
+              overflow: "hidden"
             }}
           >
             <div
-              className="brand-mark"
               style={{
-                margin: "0 auto 14px"
+                position: "absolute",
+                width: "280px",
+                height: "280px",
+                borderRadius: "50%",
+                background: "rgba(129,140,248,0.18)",
+                top: "-120px",
+                right: "-90px"
               }}
-            >
-              A
-            </div>
+            />
 
-            <h1
+            <div
               style={{
-                marginBottom: "6px"
+                position: "absolute",
+                width: "220px",
+                height: "220px",
+                borderRadius: "50%",
+                background: "rgba(56,189,248,0.12)",
+                bottom: "-100px",
+                left: "-80px"
               }}
-            >
-              AnnotatePro
-            </h1>
+            />
 
-            <p className="muted">
-              Team Operations Dashboard
-            </p>
-          </div>
-
-          <form onSubmit={handleLogin}>
-            <label>
-              Email
-              <input
-                type="email"
-                value={email}
-                onChange={e =>
-                  setEmail(e.target.value)
-                }
-                placeholder="Enter your email"
-                required
-              />
-            </label>
-
-            <label>
-              Password
-              <input
-                type="password"
-                value={password}
-                onChange={e =>
-                  setPassword(e.target.value)
-                }
-                placeholder="Enter your password"
-                required
-              />
-            </label>
-
-            {error && (
+            <div style={{ position: "relative", zIndex: 1 }}>
               <div
                 style={{
-                  marginBottom: "16px",
-                  padding: "12px",
-                  borderRadius: "10px",
-                  background: "#fff1f2",
-                  color: "#be123c"
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  marginBottom: "42px"
                 }}
               >
-                {error}
-              </div>
-            )}
+                <div
+                  style={{
+                    width: "48px",
+                    height: "48px",
+                    borderRadius: "15px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "22px",
+                    fontWeight: 800,
+                    background: "rgba(255,255,255,0.12)",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    boxShadow: "0 10px 25px rgba(0,0,0,0.16)"
+                  }}
+                >
+                  A
+                </div>
 
-            <button
-              className="primary"
-              type="submit"
-              disabled={busy}
+                <div>
+                  <div
+                    style={{
+                      fontSize: "20px",
+                      fontWeight: 800,
+                      letterSpacing: "-0.02em"
+                    }}
+                  >
+                    AnnotatePro
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "rgba(255,255,255,0.62)",
+                      marginTop: "2px"
+                    }}
+                  >
+                    Team Operations
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ maxWidth: "470px" }}>
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    padding: "7px 11px",
+                    borderRadius: "999px",
+                    background: "rgba(255,255,255,0.09)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    color: "#c7d2fe",
+                    marginBottom: "18px"
+                  }}
+                >
+                  Operations • Quality • Performance
+                </div>
+
+                <h1
+                  style={{
+                    margin: 0,
+                    fontSize: "clamp(34px, 4vw, 48px)",
+                    lineHeight: 1.05,
+                    letterSpacing: "-0.045em",
+                    color: "#ffffff"
+                  }}
+                >
+                  Manage your team’s work with confidence.
+                </h1>
+
+                <p
+                  style={{
+                    margin: "20px 0 0",
+                    fontSize: "15px",
+                    lineHeight: 1.75,
+                    color: "rgba(255,255,255,0.70)",
+                    maxWidth: "430px"
+                  }}
+                >
+                  A focused workspace for tracking daily production,
+                  project progress, QA reviews, issues, and team performance
+                  in one place.
+                </p>
+              </div>
+            </div>
+
+            <div
               style={{
-                width: "100%",
-                justifyContent: "center"
+                position: "relative",
+                zIndex: 1,
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: "10px",
+                marginTop: "40px"
               }}
             >
-              <Lock size={17} />
+              {[
+                ["01", "Daily tracking"],
+                ["02", "QA visibility"],
+                ["03", "Team insights"]
+              ].map(([number, label]) => (
+                <div
+                  key={number}
+                  style={{
+                    padding: "13px 12px",
+                    borderRadius: "13px",
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.09)"
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 800,
+                      color: "#a5b4fc",
+                      marginBottom: "5px"
+                    }}
+                  >
+                    {number}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: "rgba(255,255,255,0.72)",
+                      fontWeight: 600
+                    }}
+                  >
+                    {label}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-              {busy
-                ? "Signing in..."
-                : "Sign in"}
-            </button>
-          </form>
+          <div
+            className="annotatepro-login-form-panel"
+            style={{
+              padding: "52px 46px",
+              display: "flex",
+              alignItems: "center",
+              background: "#ffffff"
+            }}
+          >
+            <div style={{ width: "100%", maxWidth: "390px", margin: "0 auto" }}>
+              <div style={{ marginBottom: "30px" }}>
+                <div
+                  style={{
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "13px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "#eef2ff",
+                    color: "#4f46e5",
+                    marginBottom: "18px"
+                  }}
+                >
+                  <Lock size={20} />
+                </div>
+
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: "30px",
+                    lineHeight: 1.15,
+                    letterSpacing: "-0.035em",
+                    color: "#0f172a"
+                  }}
+                >
+                  Welcome back
+                </h2>
+
+                <p
+                  style={{
+                    margin: "9px 0 0",
+                    color: "#64748b",
+                    fontSize: "14px",
+                    lineHeight: 1.6
+                  }}
+                >
+                  Sign in to continue to your dashboard.
+                </p>
+              </div>
+
+              <form onSubmit={handleLogin}>
+                <div style={{ marginBottom: "20px" }}>
+                  <label
+                    htmlFor="login-email"
+                    style={{
+                      display: "block",
+                      marginBottom: "8px",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "#334155"
+                    }}
+                  >
+                    Email address
+                  </label>
+                  <input
+                    id="login-email"
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    required
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      height: "50px",
+                      padding: "0 15px",
+                      borderRadius: "12px",
+                      border: "1px solid #dbe2ea",
+                      background: "#f8fafc",
+                      color: "#0f172a",
+                      fontSize: "14px",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: "18px" }}>
+                  <label
+                    htmlFor="login-password"
+                    style={{
+                      display: "block",
+                      marginBottom: "8px",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "#334155"
+                    }}
+                  >
+                    Password
+                  </label>
+
+                  <div style={{ position: "relative" }}>
+                    <input
+                      id="login-password"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
+                      required
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        height: "50px",
+                        padding: "0 78px 0 15px",
+                        borderRadius: "12px",
+                        border: "1px solid #dbe2ea",
+                        background: "#f8fafc",
+                        color: "#0f172a",
+                        fontSize: "14px",
+                        outline: "none"
+                      }}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(value => !value)}
+                      style={{
+                        position: "absolute",
+                        top: "50%",
+                        right: "10px",
+                        transform: "translateY(-50%)",
+                        border: 0,
+                        background: "transparent",
+                        color: "#64748b",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        padding: "7px 8px",
+                        borderRadius: "8px"
+                      }}
+                    >
+                      {showPassword ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                </div>
+
+                {error && (
+                  <div
+                    role="alert"
+                    style={{
+                      marginBottom: "18px",
+                      padding: "12px 13px",
+                      borderRadius: "11px",
+                      background: "#fff1f2",
+                      border: "1px solid #fecdd3",
+                      color: "#be123c",
+                      fontSize: "13px",
+                      lineHeight: 1.5
+                    }}
+                  >
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  className="primary"
+                  type="submit"
+                  disabled={busy}
+                  style={{
+                    width: "100%",
+                    minHeight: "50px",
+                    justifyContent: "center",
+                    borderRadius: "12px",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    boxShadow: "0 10px 24px rgba(79,70,229,0.18)",
+                    opacity: busy ? 0.72 : 1,
+                    cursor: busy ? "not-allowed" : "pointer"
+                  }}
+                >
+                  <Lock size={17} />
+                  {busy ? "Signing in..." : "Sign in to dashboard"}
+                </button>
+              </form>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  marginTop: "26px",
+                  color: "#94a3b8",
+                  fontSize: "11px"
+                }}
+              >
+                <div style={{ height: "1px", flex: 1, background: "#e2e8f0" }} />
+                <span>Secure team access</span>
+                <div style={{ height: "1px", flex: 1, background: "#e2e8f0" }} />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
+      <style>{`
+        @media (max-width: 820px) {
+          .annotatepro-login-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 820px) {
+          .annotatepro-login-grid > div:first-child {
+            display: none !important;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .annotatepro-login-form-panel {
+            padding: 34px 24px !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
