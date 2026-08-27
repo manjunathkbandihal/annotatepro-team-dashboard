@@ -2,41 +2,18 @@ import React, { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createRoot } from "react-dom/client";
 import {
-  LayoutDashboard,
-  Users,
-  FolderKanban,
-  ClipboardCheck,
-  AlertTriangle,
-  BarChart3,
-  Settings,
-  Search,
-  Plus,
-  Bell,
-  Download,
-  Upload,
-  Menu,
-  X,
-  CheckCircle2,
-  Target,
-  Image as ImageIcon,
-  ChevronRight,
-  Trash2,
-  Activity,
-  ShieldCheck,
-  LogOut,
-  Lock,
-  UserPlus,
-  Save,
-  RefreshCw
+  LayoutDashboard, Users, FolderKanban, ClipboardCheck,
+  AlertTriangle, BarChart3, Settings, Search, Plus, Bell,
+  Download, Upload, Menu, X, CheckCircle2, Target,
+  Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
+  LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink
 } from "lucide-react";
-
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
 
 /* =========================================================
    PROJECT TARGETS
 ========================================================= */
-
 const projectTargets = {
   momah_phase2_april: 1000,
   MBS_Street_Detections_Phase2: 1000,
@@ -46,9 +23,11 @@ const projectTargets = {
 };
 
 /* =========================================================
-   PROJECT STATUS
+   STATUS HELPER
+   Pending     = completed 0 and remaining = total
+   In Progress = completed > 0 and remaining > 0
+   Completed   = remaining 0
 ========================================================= */
-
 function getProjectStatus(total, completed, remaining) {
   const t = Math.max(0, Number(total) || 0);
   const c = Math.max(0, Number(completed) || 0);
@@ -57,7 +36,6 @@ function getProjectStatus(total, completed, remaining) {
   if (!t) return "No Target";
   if (r === 0 || c >= t) return "Completed";
   if (c === 0 || r >= t) return "Pending";
-
   return "In Progress";
 }
 
@@ -78,21 +56,12 @@ function getProjectStats(project) {
     );
   }
 
-  completed = Math.min(
-    completed,
-    total || completed
-  );
+  completed = Math.min(completed, total || completed);
 
-  const remaining = Math.max(
-    0,
-    total - completed
-  );
+  const remaining = Math.max(0, total - completed);
 
   const progress = total
-    ? Math.min(
-        100,
-        Math.round((completed / total) * 100)
-      )
+    ? Math.min(100, Math.round((completed / total) * 100))
     : 0;
 
   return {
@@ -100,347 +69,918 @@ function getProjectStats(project) {
     completed,
     remaining,
     progress,
-    status: getProjectStatus(
-      total,
-      completed,
-      remaining
-    )
+    status: getProjectStatus(total, completed, remaining)
   };
 }
 
 /* =========================================================
    DEFAULT DATA
 ========================================================= */
-
 const seed = {
   team: [
-    {
-      id: 1,
-      name: "Manjunath",
-      role: "Team Lead",
-      target: 1000,
-      completed: 862,
-      reviewed: 540,
-      errors: 12,
-      status: "Active"
-    },
-    {
-      id: 2,
-      name: "Rahul",
-      role: "Annotator",
-      target: 1000,
-      completed: 918,
-      reviewed: 420,
-      errors: 18,
-      status: "Active"
-    },
-    {
-      id: 3,
-      name: "Priya",
-      role: "Annotator",
-      target: 1000,
-      completed: 744,
-      reviewed: 390,
-      errors: 9,
-      status: "Active"
-    },
-    {
-      id: 4,
-      name: "Arun",
-      role: "Reviewer",
-      target: 400,
-      completed: 372,
-      reviewed: 372,
-      errors: 7,
-      status: "Active"
-    },
-    {
-      id: 5,
-      name: "Sneha",
-      role: "Annotator",
-      target: 1000,
-      completed: 1000,
-      reviewed: 610,
-      errors: 6,
-      status: "Active"
-    },
-    {
-      id: 6,
-      name: "Kiran",
-      role: "Annotator",
-      target: 1000,
-      completed: 581,
-      reviewed: 240,
-      errors: 21,
-      status: "Away"
-    }
+    { id: 1, name: "Manjunath", role: "Team Lead", target: 1000, completed: 862, reviewed: 540, errors: 12, status: "Active" },
+    { id: 2, name: "Rahul", role: "Annotator", target: 1000, completed: 918, reviewed: 420, errors: 18, status: "Active" },
+    { id: 3, name: "Priya", role: "Annotator", target: 1000, completed: 744, reviewed: 390, errors: 9, status: "Active" },
+    { id: 4, name: "Arun", role: "Reviewer", target: 400, completed: 372, reviewed: 372, errors: 7, status: "Active" },
+    { id: 5, name: "Sneha", role: "Annotator", target: 1000, completed: 1000, reviewed: 610, errors: 6, status: "Active" },
+    { id: 6, name: "Kiran", role: "Annotator", target: 1000, completed: 581, reviewed: 240, errors: 21, status: "Away" }
   ],
-
   projects: [
-    {
-      id: 1,
-      name: "momah_phase2_april",
-      target: 1000,
-      total: 1000,
-      completed: 0,
-      remaining: 1000,
-      status: "Pending",
-      deadline: ""
-    },
-    {
-      id: 2,
-      name: "MBS_Street_Detections_Phase2",
-      target: 1000,
-      total: 1000,
-      completed: 0,
-      remaining: 1000,
-      status: "Pending",
-      deadline: ""
-    },
-    {
-      id: 3,
-      name: "MBS_frames_june_phase2",
-      target: 1000,
-      total: 1000,
-      completed: 0,
-      remaining: 1000,
-      status: "Pending",
-      deadline: ""
-    },
-    {
-      id: 4,
-      name: "combined_aug_data_1",
-      target: 800,
-      total: 800,
-      completed: 0,
-      remaining: 800,
-      status: "Pending",
-      deadline: ""
-    },
-    {
-      id: 5,
-      name: "iltwy_73026_53front_1",
-      target: 350,
-      total: 350,
-      completed: 0,
-      remaining: 350,
-      status: "Pending",
-      deadline: ""
-    }
+    { id: 1, name: "momah_phase2_april", target: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
+    { id: 2, name: "MBS_Street_Detections_Phase2", target: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
+    { id: 3, name: "MBS_frames_june_phase2", target: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
+    { id: 4, name: "combined_aug_data_1", target: 800, total: 800, completed: 0, remaining: 800, status: "Pending", deadline: "" },
+    { id: 5, name: "iltwy_73026_53front_1", target: 350, total: 350, completed: 0, remaining: 350, status: "Pending", deadline: "" }
   ],
-
   issues: [
-    {
-      id: 1,
-      type: "Missed labels",
-      project: "PCI_Annotations",
-      owner: "Priya",
-      severity: "High",
-      status: "Open",
-      date: "2026-08-11"
-    },
-    {
-      id: 2,
-      type: "Wrong prediction",
-      project: "hase2_july_data_1",
-      owner: "Kiran",
-      severity: "Medium",
-      status: "Open",
-      date: "2026-08-11"
-    },
-    {
-      id: 3,
-      type: "Label inconsistency",
-      project: "PCI_Annotations",
-      owner: "Rahul",
-      severity: "Low",
-      status: "Resolved",
-      date: "2026-08-10"
-    }
-  ],
-
-  sheetRecords: []
+    { id: 1, type: "Missed labels", project: "PCI_Annotations", owner: "Priya", severity: "High", status: "Open", date: "2026-08-11" },
+    { id: 2, type: "Wrong prediction", project: "hase2_july_data_1", owner: "Kiran", severity: "Medium", status: "Open", date: "2026-08-11" },
+    { id: 3, type: "Label inconsistency", project: "PCI_Annotations", owner: "Rahul", severity: "Low", status: "Resolved", date: "2026-08-10" }
+  ]
 };
 
-/* =========================================================
-   LOCAL FALLBACK
-========================================================= */
-
-function loadLocalData() {
+function loadData() {
   try {
-    const saved = JSON.parse(
-      localStorage.getItem("annotatepro-data")
-    );
-
-    if (!saved) {
-      return seed;
-    }
+    const saved = JSON.parse(localStorage.getItem("annotatepro-data"));
+    if (!saved) return seed;
 
     return {
       ...seed,
       ...saved,
-      team: Array.isArray(saved.team)
-        ? saved.team
-        : seed.team,
+      team: Array.isArray(saved.team) ? saved.team : seed.team,
       projects: Array.isArray(saved.projects)
         ? saved.projects.map(p => {
             const s = getProjectStats(p);
-
-            return {
-              ...p,
-              ...s,
-              target: s.total,
-              total: s.total
-            };
+            return { ...p, ...s, target: s.total, total: s.total };
           })
         : seed.projects,
-      issues: Array.isArray(saved.issues)
-        ? saved.issues
-        : seed.issues,
-      sheetRecords: Array.isArray(saved.sheetRecords)
-        ? saved.sheetRecords
-        : []
+      issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
+      sheetRecords: Array.isArray(saved.sheetRecords) ? saved.sheetRecords : [],
+      accuracyRecords: Array.isArray(saved.accuracyRecords) ? saved.accuracyRecords : [],
+      accuracyFile: saved.accuracyFile || "",
+      accuracyLastSync: saved.accuracyLastSync || ""
     };
   } catch {
     return seed;
   }
 }
 
-/* =========================================================
-   ONLINE DATA HELPERS
-========================================================= */
-
-async function loadOnlineData() {
-  if (!supabase) {
-    return loadLocalData();
-  }
-
-  const { data, error } = await supabase
-    .from("dashboard_state")
-    .select("data")
-    .eq("id", 1)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Supabase load error:", error);
-    throw error;
-  }
-
-  if (!data?.data || Object.keys(data.data).length === 0) {
-    return seed;
-  }
-
-  const saved = data.data;
-
-  return {
-    ...seed,
-    ...saved,
-    team: Array.isArray(saved.team)
-      ? saved.team
-      : seed.team,
-    projects: Array.isArray(saved.projects)
-      ? saved.projects.map(p => {
-          const s = getProjectStats(p);
-
-          return {
-            ...p,
-            ...s,
-            target: s.total,
-            total: s.total
-          };
-        })
-      : seed.projects,
-    issues: Array.isArray(saved.issues)
-      ? saved.issues
-      : seed.issues,
-    sheetRecords: Array.isArray(saved.sheetRecords)
-      ? saved.sheetRecords
-      : []
-  };
+function saveData(data) {
+  localStorage.setItem("annotatepro-data", JSON.stringify(data));
 }
-
-async function saveOnlineData(data) {
-  if (!supabase) {
-    localStorage.setItem(
-      "annotatepro-data",
-      JSON.stringify(data)
-    );
-
-    return;
-  }
-
-  const { error } = await supabase
-    .from("dashboard_state")
-    .upsert(
-      {
-        id: 1,
-        data,
-        updated_at: new Date().toISOString()
-      },
-      {
-        onConflict: "id"
-      }
-    );
-
-  if (error) {
-    console.error(
-      "Supabase save error:",
-      error
-    );
-
-    throw error;
-  }
-}
-
-/* =========================================================
-   PROJECT NAME
-========================================================= */
 
 function getConfiguredProjectName(project) {
   const clean = String(project || "").trim();
-
   const found = Object.keys(projectTargets).find(
-    name =>
-      name.toLowerCase() === clean.toLowerCase()
+    name => name.toLowerCase() === clean.toLowerCase()
   );
-
   return found || clean;
 }
 
+function toISODate(year, month, day) {
+  const y = Number(year), m = Number(month), d = Number(day);
+  if (!y || !m || !d) return "";
+  const date = new Date(y, m - 1, d);
+  if (Number.isNaN(date.getTime())) return "";
+  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return "";
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+
+function normalizeDateValue(value) {
+  if (value == null || value === "") return "";
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toISODate(value.getFullYear(), value.getMonth() + 1, value.getDate());
+  }
+
+  if (typeof value === "number" && Number.isFinite(value) && value > 20000 && value < 80000) {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(excelEpoch.getTime() + Math.round(value * 86400000));
+    return toISODate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  }
+
+  const text = String(value).trim();
+  let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return toISODate(m[1], m[2], m[3]);
+
+  m = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (m) return toISODate(m[3], m[2], m[1]);
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime())
+    ? ""
+    : toISODate(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate());
+}
+
+function getDateRange(filter) {
+  if (!filter) {
+    return { start: "", end: "", label: "Select a date" };
+  }
+
+  const start = filter.start || "";
+  const end = filter.mode === "range" ? (filter.end || "") : start;
+
+  if (!start) {
+    return { start: "", end: "", label: filter.mode === "range" ? "Select a date range" : "Select a date" };
+  }
+
+  if (filter.mode === "range" && !end) {
+    return { start, end: "", label: `${start} → Select end date` };
+  }
+
+  if (filter.mode === "range" && end < start) {
+    return { start: end, end: start, label: `${end} → ${start}` };
+  }
+
+  return {
+    start,
+    end,
+    label: start === end ? start : `${start} → ${end}`
+  };
+}
+
+function isDateInRange(date, range) {
+  if (!range.start || !range.end || !date) return false;
+
+  // Always compare normalized YYYY-MM-DD values. This prevents
+  // stored ISO timestamps (e.g. 2026-08-12T00:00:00.000Z) or
+  // Excel/text date formats from being excluded accidentally.
+  const normalized = normalizeDateValue(date);
+  return normalized >= range.start && normalized <= range.end;
+}
+
+function getLatestImportedDate(data) {
+  const dates = [
+    ...(Array.isArray(data?.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
+    ...(Array.isArray(data?.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
+  ].filter(Boolean).sort();
+
+  return dates.length ? dates[dates.length - 1] : "";
+}
+
+function DateFilter({ value, onChange, data }) {
+  const allDates = [
+    ...(Array.isArray(data.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
+    ...(Array.isArray(data.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
+  ].filter(Boolean).sort();
+
+  const firstDate = allDates[0] || "";
+  const lastDate = allDates[allDates.length - 1] || "";
+  const mode = value?.mode || "single";
+
+  const updateFilter = patch => {
+    const next = { ...value, ...patch };
+
+    if (next.mode === "single") {
+      next.end = next.start || "";
+    }
+
+    onChange(next);
+  };
+
+  const switchMode = nextMode => {
+    if (nextMode === "range") {
+      onChange({
+        mode: "range",
+        start: value?.start || firstDate,
+        end: value?.end || lastDate || value?.start || firstDate
+      });
+    } else {
+      onChange({
+        mode: "single",
+        start: value?.start || lastDate,
+        end: value?.start || lastDate
+      });
+    }
+  };
+
+  return (
+    <div className="date-filter">
+      <div className="date-filter-info">
+        <b>Report date</b>
+        <small>
+          {mode === "range"
+            ? (value?.start && value?.end
+                ? `${value.start} → ${value.end}`
+                : "Select a start and end date")
+            : (value?.start || "Select a date")}
+        </small>
+      </div>
+
+      <div className="date-filter-controls">
+        <div className="date-filter-mode">
+          <button
+            type="button"
+            className={mode === "single" ? "active" : ""}
+            onClick={() => switchMode("single")}
+          >
+            Single date
+          </button>
+          <button
+            type="button"
+            className={mode === "range" ? "active" : ""}
+            onClick={() => switchMode("range")}
+          >
+            From → To
+          </button>
+        </div>
+
+        {mode === "single" ? (
+          <input
+            type="date"
+            value={value?.start || ""}
+            min={firstDate || undefined}
+            max={lastDate || undefined}
+            onChange={e => updateFilter({ start: e.target.value })}
+            aria-label="Select report date"
+          />
+        ) : (
+          <div className="date-range-inputs">
+            <label>
+              <span>From</span>
+              <input
+                type="date"
+                value={value?.start || ""}
+                min={firstDate || undefined}
+                max={value?.end || lastDate || undefined}
+                onChange={e => updateFilter({ start: e.target.value })}
+                aria-label="Report start date"
+              />
+            </label>
+            <span className="date-range-arrow">→</span>
+            <label>
+              <span>To</span>
+              <input
+                type="date"
+                value={value?.end || ""}
+                min={value?.start || firstDate || undefined}
+                max={lastDate || undefined}
+                onChange={e => updateFilter({ end: e.target.value })}
+                aria-label="Report end date"
+              />
+            </label>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 /* =========================================================
-   PERMISSIONS
+   APP
 ========================================================= */
+function App() {
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
 
-function canEdit(role) {
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setAuthLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+
+    const loadSession = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!active) return;
+      setSession(sessionData.session || null);
+      setAuthLoading(false);
+    };
+
+    loadSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => {
+        setSession(nextSession || null);
+        if (!nextSession) setProfile(null);
+      }
+    );
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session || !supabase) return;
+
+    let active = true;
+
+    const loadProfile = async () => {
+      const user = session.user;
+      const fallbackName =
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        user.email?.split("@")[0] ||
+        "User";
+
+      // Read the complete profile row instead of selecting only full_name.
+      // This keeps the login compatible with profiles tables that use either
+      // full_name or name for the display-name column.
+      const { data: row, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (!active) return;
+
+      if (error) {
+        console.error("Could not load profile row", error);
+      }
+
+      let resolvedRole = row?.role;
+
+      // The database schema also exposes get_my_role() as a safe fallback.
+      // This is useful if a profile SELECT is temporarily blocked by RLS.
+      if (!resolvedRole) {
+        const { data: roleData, error: roleError } = await supabase.rpc("get_my_role");
+        if (!roleError && roleData) {
+          resolvedRole = roleData;
+        } else if (roleError) {
+          console.warn("Could not load role through get_my_role()", roleError);
+        }
+      }
+
+      const normalizedRole = ["admin", "team_lead", "member"].includes(
+        String(resolvedRole || "").toLowerCase()
+      )
+        ? String(resolvedRole).toLowerCase()
+        : "member";
+
+      setProfile({
+        id: user.id,
+        full_name: row?.full_name || row?.name || fallbackName,
+        role: normalizedRole
+      });
+    };
+
+    loadProfile();
+    return () => { active = false; };
+  }, [session]);
+
+  if (authLoading) {
+    return <AuthLoading />;
+  }
+
+  if (isSupabaseConfigured && !session) {
+    return <LoginScreen />;
+  }
+
+  if (isSupabaseConfigured && !profile) {
+    return <AuthLoading text="Loading your account..." />;
+  }
+
   return (
-    role === "admin" ||
-    role === "team_lead"
+    <DashboardApp
+      session={session}
+      profile={profile || { full_name: "Manjunath", role: "team_lead" }}
+      onSignOut={() => supabase?.auth.signOut()}
+    />
   );
 }
 
-function canDelete(role) {
-  return role === "admin";
-}
+function DashboardApp({ session, profile, onSignOut }) {
+  const [data, setData] = useState(loadData);
+  const [dataReady, setDataReady] = useState(!isSupabaseConfigured);
+  const [page, setPage] = useState("dashboard");
+  const [query, setQuery] = useState("");
+  const [sidebar, setSidebar] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addType, setAddType] = useState("team");
+  const [editingMember, setEditingMember] = useState(null);
+  const [editingProject, setEditingProject] = useState(null);
+  const [toast, setToast] = useState("");
 
-function canManageProjects(role) {
+  const role = profile?.role || "member";
+  const canManageTeam = ["admin", "team_lead"].includes(role);
+  const canManageProjects = ["admin", "team_lead"].includes(role);
+  const canManageIssues = ["admin", "team_lead"].includes(role);
+  const canImport = ["admin", "team_lead"].includes(role);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !profile) return;
+
+    let active = true;
+
+    const loadCloudData = async () => {
+      const { data: row, error } = await supabase
+        .from("dashboard_state")
+        .select("data")
+        .eq("id", 1)
+        .maybeSingle();
+
+      if (!active) return;
+
+      if (error) {
+        console.error("Could not load online dashboard data", error);
+        notify("Could not load online data. Using local backup.");
+        setDataReady(true);
+        return;
+      }
+
+      if (row?.data && Object.keys(row.data).length) {
+        const cloud = row.data;
+        const normalized = {
+          ...seed,
+          ...cloud,
+          team: Array.isArray(cloud.team) ? cloud.team : seed.team,
+          projects: Array.isArray(cloud.projects)
+            ? cloud.projects.map(p => {
+                const stats = getProjectStats(p);
+                return { ...p, ...stats, target: stats.total, total: stats.total };
+              })
+            : seed.projects,
+          issues: Array.isArray(cloud.issues) ? cloud.issues : seed.issues
+        };
+        setData(normalized);
+        saveData(normalized);
+      } else if (canManageTeam) {
+        const local = loadData();
+        setData(local);
+        const { error: seedError } = await supabase
+          .from("dashboard_state")
+          .upsert({ id: 1, data: local, updated_at: new Date().toISOString() });
+        if (seedError) console.error("Could not seed online data", seedError);
+      }
+
+      setDataReady(true);
+    };
+
+    loadCloudData();
+    return () => { active = false; };
+  }, [profile, canManageTeam]);
+
+  const update = async next => {
+    if (isSupabaseConfigured && supabase && !canManageTeam) {
+      notify("Your role is view-only for this action.");
+      return false;
+    }
+
+    setData(next);
+    saveData(next);
+
+    if (!isSupabaseConfigured || !supabase || !dataReady) return true;
+
+    const { error } = await supabase
+      .from("dashboard_state")
+      .upsert({ id: 1, data: next, updated_at: new Date().toISOString() });
+
+    if (error) {
+      console.error("Online save failed", error);
+      notify("Online save failed. Your local copy was kept.");
+      return false;
+    }
+
+    return true;
+  };
+
+  const notify = msg => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 2500);
+  };
+
+  const nav = [
+    ["dashboard", "Dashboard", LayoutDashboard],
+    ["team", "Team", Users],
+    ["projects", "Projects", FolderKanban],
+    ["qa", "QA & Reviews", ClipboardCheck],
+    ["issues", "Issues", AlertTriangle],
+    ["analytics", "Analytics", BarChart3],
+    ["settings", "Settings", Settings],
+    ["sheet", "Sheet Import", Upload]
+  ];
+
+  const filteredTeam = useMemo(
+    () =>
+      data.team.filter(x =>
+        String(x.name || "").toLowerCase().includes(query.toLowerCase())
+      ),
+    [data.team, query]
+  );
+
+  const totals = useMemo(() => {
+    const total = data.team.reduce((s, x) => s + (Number(x.target) || 0), 0);
+    const done = data.team.reduce((s, x) => s + (Number(x.completed) || 0), 0);
+    const reviewed = data.team.reduce((s, x) => s + (Number(x.reviewed) || 0), 0);
+    const remaining = data.projects.reduce(
+      (s, x) => s + getProjectStats(x).remaining,
+      0
+    );
+
+    return {
+      total,
+      done,
+      reviewed,
+      remaining,
+      rate: total ? Math.round((done / total) * 100) : 0
+    };
+  }, [data]);
+
+  function addRecord(e) {
+    e.preventDefault();
+    if (addType === "team" && !canManageTeam) return notify("Only Admin or Team Lead can manage team members.");
+    if (addType === "project" && !canManageProjects) return notify("Only Admin or Team Lead can manage projects.");
+    if (addType === "issue" && !canManageIssues) return notify("Only Admin or Team Lead can manage issues.");
+    const f = new FormData(e.currentTarget);
+    let next = { ...data };
+
+    if (addType === "team") {
+      const target = Number(f.get("target") || 1000);
+      next.team = [
+        ...data.team,
+        {
+          id: Date.now(),
+          name: f.get("name"),
+          role: f.get("role"),
+          target,
+          completed: Number(f.get("completed") || 0),
+          reviewed: 0,
+          errors: 0,
+          status: "Active"
+        }
+      ];
+    } else if (addType === "project") {
+      const name = String(f.get("name") || "").trim();
+      const totalImages = Math.max(0, Number(f.get("totalImages") || 0));
+      const target = Math.max(0, Number(f.get("target") || 0));
+      const completed = Math.max(0, Math.min(totalImages, Number(f.get("completed") || 0)));
+      const remaining = Math.max(0, totalImages - completed);
+
+      next.projects = [
+        ...data.projects,
+        {
+          id: Date.now(),
+          name,
+          totalImages,
+          total: totalImages,
+          target,
+          completed,
+          remaining,
+          status: getProjectStatus(totalImages, completed, remaining),
+          deadline: f.get("deadline") || ""
+        }
+      ];
+    } else {
+      next.issues = [
+        ...data.issues,
+        {
+          id: Date.now(),
+          type: f.get("type"),
+          project: f.get("project"),
+          owner: f.get("owner"),
+          severity: f.get("severity"),
+          status: "Open",
+          date: new Date().toISOString().slice(0, 10)
+        }
+      ];
+    }
+
+    update(next);
+    setShowAdd(false);
+    notify("Saved successfully");
+  }
+
+  function editProject(e) {
+    e.preventDefault();
+    if (!canManageProjects) return notify("Only Admin or Team Lead can manage projects.");
+    const f = new FormData(e.currentTarget);
+    if (!editingProject) return;
+
+    const name = String(f.get("name") || "").trim();
+    const totalImages = Math.max(0, Number(f.get("totalImages") || 0));
+    const target = Math.max(0, Number(f.get("target") || 0));
+    const completed = Math.max(0, Math.min(totalImages, Number(f.get("completed") || 0)));
+    const remaining = Math.max(0, totalImages - completed);
+
+    const projects = data.projects.map(project =>
+      project.id === editingProject.id
+        ? {
+            ...project,
+            name,
+            totalImages,
+            target,
+            total: totalImages,
+            completed,
+            remaining,
+            status: getProjectStatus(totalImages, completed, remaining),
+            deadline: f.get("deadline") || ""
+          }
+        : project
+    );
+
+    update({ ...data, projects });
+    setEditingProject(null);
+    notify("Project updated successfully");
+  }
+
+  function remove(kind, id) {
+    if (kind === "projects" && !canManageProjects) return notify("Only Admin or Team Lead can delete projects.");
+    if (kind === "issues" && !canManageIssues) return notify("Only Admin or Team Lead can delete issues.");
+    if (!confirm("Delete this record?")) return;
+
+    update({
+      ...data,
+      [kind]: data[kind].filter(x => x.id !== id)
+    });
+
+    notify("Deleted");
+  }
+
+  function saveTeamMember(formData, editing) {
+    if (!canManageTeam) return notify("Only Admin or Team Lead can manage team members.");
+
+    const name = String(formData.get("name") || "").trim();
+    if (!name) return;
+
+    const member = {
+      id: editing?.id || Date.now(),
+      name,
+      role: String(formData.get("role") || "Annotator"),
+      target: Number(formData.get("target") || 0),
+      completed: Number(formData.get("completed") || 0),
+      reviewed: Number(formData.get("reviewed") || 0),
+      errors: Number(formData.get("errors") || 0),
+      status: String(formData.get("status") || "Active")
+    };
+
+    const nextTeam = editing
+      ? data.team.map(x => x.id === editing.id ? member : x)
+      : [...data.team, member];
+
+    update({ ...data, team: nextTeam });
+    setEditingMember(null);
+    setShowAdd(false);
+    notify(editing ? "Team member updated" : "Team member added");
+  }
+
+  function removeTeamMember(name) {
+    if (!canManageTeam) return notify("Only Admin or Team Lead can delete team members.");
+    if (!confirm(`Delete ${name} from the team?`)) return;
+
+    const next = {
+      ...data,
+      team: data.team.filter(x => String(x.name).toLowerCase() !== String(name).toLowerCase()),
+      sheetRecords: Array.isArray(data.sheetRecords)
+        ? data.sheetRecords.filter(x => String(x.name).toLowerCase() !== String(name).toLowerCase())
+        : data.sheetRecords
+    };
+
+    update(next);
+    notify("Team member deleted");
+  }
+
+  function exportData() {
+    const blob = new Blob(
+      [JSON.stringify(data, null, 2)],
+      { type: "application/json" }
+    );
+
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "annotatepro-backup.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    notify("Backup exported");
+  }
+
+  function importData(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const r = new FileReader();
+
+    r.onload = () => {
+      try {
+        const parsed = JSON.parse(r.result);
+
+        if (parsed.team && parsed.projects && parsed.issues) {
+          const projects = parsed.projects.map(p => {
+            const s = getProjectStats(p);
+            return {
+              ...p,
+              ...s,
+              target: s.total,
+              total: s.total
+            };
+          });
+
+          update({ ...parsed, projects });
+          notify("Backup imported");
+        } else {
+          alert("Invalid dashboard backup");
+        }
+      } catch {
+        alert("Invalid JSON file");
+      }
+    };
+
+    r.readAsText(file);
+    e.target.value = "";
+  }
+
   return (
-    role === "admin" ||
-    role === "team_lead"
+    <div className="app">
+      <aside className={"sidebar " + (!sidebar ? "collapsed" : "")}>
+        <div className="brand">
+          <div className="brand-mark">A</div>
+          {sidebar && (
+            <div>
+              <b>AnnotatePro</b>
+              <span>Team Operations</span>
+            </div>
+          )}
+        </div>
+
+        <nav>
+          {nav.map(([key, label, Icon]) => (
+            <button
+              key={key}
+              className={page === key ? "active" : ""}
+              onClick={() => setPage(key)}
+            >
+              <Icon size={19} />
+              {sidebar && <span>{label}</span>}
+            </button>
+          ))}
+        </nav>
+
+        {sidebar && (
+          <div className="side-card">
+            <ShieldCheck size={20} />
+            <b>Quality first</b>
+            <p>Track annotation accuracy and resolve issues early.</p>
+          </div>
+        )}
+
+        <button className="collapse" onClick={() => setSidebar(!sidebar)}>
+          {sidebar ? <ChevronRight size={18} /> : <Menu size={18} />}
+          <span>{sidebar ? "Collapse" : "Expand"}</span>
+        </button>
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <div className="mobile-menu" onClick={() => setSidebar(!sidebar)}>
+            <Menu />
+          </div>
+
+          <div className="search">
+            <Search size={18} />
+            <input
+              placeholder="Search team members..."
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="top-actions">
+            <button className="icon-btn">
+              <Bell size={19} />
+              <i />
+            </button>
+            <div className="avatar">{String(profile?.full_name || "U").slice(0, 2).toUpperCase()}</div>
+            <div className="user">
+              <b>{profile?.full_name || session?.user?.email || "User"}</b>
+              <span>{roleLabel(role)}</span>
+            </div>
+            <button className="icon-btn" title="Sign out" onClick={onSignOut}>
+              <LogOut size={18} />
+            </button>
+          </div>
+        </header>
+
+        <section className="content">
+          {page === "dashboard" && (
+            <Dashboard totals={totals} data={data} setPage={setPage} />
+          )}
+
+          {page === "team" && (
+            <Team
+              rows={filteredTeam}
+              data={data}
+              canManage={canManageTeam}
+              openAdd={() => {
+                if (!canManageTeam) return notify("Only Admin or Team Lead can add members.");
+                setEditingMember(null);
+                setAddType("team");
+                setShowAdd(true);
+              }}
+              onEdit={member => { setEditingMember(member); setAddType("team"); setShowAdd(true); }}
+              onDelete={removeTeamMember}
+            />
+          )}
+
+          {page === "projects" && (
+            <Projects
+              rows={data.projects}
+              remove={remove}
+              canManage={canManageProjects}
+              openAdd={() => {
+                setAddType("project");
+                setShowAdd(true);
+              }}
+              openEdit={setEditingProject}
+            />
+          )}
+
+          {page === "qa" && <QA data={data} />}
+
+          {page === "issues" && (
+            <Issues
+              rows={data.issues}
+              remove={remove}
+              canManage={canManageIssues}
+              openAdd={() => {
+                setAddType("issue");
+                setShowAdd(true);
+              }}
+            />
+          )}
+
+          {page === "analytics" && <Analytics data={data} />}
+
+          {page === "settings" && (
+            <SettingsPage
+              exportData={exportData}
+              importData={importData}
+              role={role}
+              storageOnline={isSupabaseConfigured}
+              email={session?.user?.email}
+              onSignOut={onSignOut}
+            />
+          )}
+
+          {page === "sheet" && (
+            canImport ? (
+              <SheetImport data={data} update={update} notify={notify} />
+            ) : (
+              <Page title="Sheet Import" subtitle="Daily imports are restricted to Admin and Team Lead accounts.">
+                <Panel title="Permission required">
+                  <p className="muted">Your current role can view dashboard data but cannot import or overwrite daily sheet data.</p>
+                </Panel>
+              </Page>
+            )
+          )}
+        </section>
+      </main>
+
+      {showAdd && addType === "team" && (
+        <TeamMemberModal
+          member={editingMember}
+          onClose={() => { setShowAdd(false); setEditingMember(null); }}
+          onSubmit={saveTeamMember}
+        />
+      )}
+
+      {showAdd && addType !== "team" && (
+        <Modal
+          type={addType}
+          onClose={() => setShowAdd(false)}
+          onSubmit={addRecord}
+        />
+      )}
+
+      {editingProject && (
+        <ProjectEditModal
+          project={editingProject}
+          onClose={() => setEditingProject(null)}
+          onSubmit={editProject}
+        />
+      )}
+
+      {toast && (
+        <div className="toast">
+          <CheckCircle2 size={18} />
+          {toast}
+        </div>
+      )}
+    </div>
   );
 }
 
-function canManageIssues(role) {
+function roleLabel(role) {
+  return ({ admin: "Admin", team_lead: "Team Lead", member: "Member" }[role] || "Member");
+}
+
+function AuthLoading({ text = "Loading AnnotatePro..." }) {
   return (
-    role === "admin" ||
-    role === "team_lead"
+    <div className="auth-shell">
+      <div className="auth-card auth-loading">
+        <div className="brand-mark">A</div>
+        <h1>AnnotatePro</h1>
+        <p>{text}</p>
+      </div>
+    </div>
   );
 }
 
-/* =========================================================
-   LOGIN
-========================================================= */
-
-function Login({ onLoggedIn }) {
+function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -472,8 +1012,6 @@ function Login({ onLoggedIn }) {
       setBusy(false);
       return;
     }
-
-    onLoggedIn(data.user);
 
     setBusy(false);
   }
@@ -731,7 +1269,7 @@ function Login({ onLoggedIn }) {
                     marginBottom: "18px"
                   }}
                 >
-                  <Lock size={20} />
+                  <LockKeyhole size={20} />
                 </div>
 
                 <h2
@@ -889,7 +1427,7 @@ function Login({ onLoggedIn }) {
                     cursor: busy ? "not-allowed" : "pointer"
                   }}
                 >
-                  <Lock size={17} />
+                  <LockKeyhole size={17} />
                   {busy ? "Signing in..." : "Sign in to dashboard"}
                 </button>
               </form>
@@ -937,1344 +1475,28 @@ function Login({ onLoggedIn }) {
 }
 
 /* =========================================================
-   PROFILE
-========================================================= */
-
-async function getProfile(user, options = {}) {
-  if (!supabase || !user) {
-    return {
-      profile: null,
-      error: new Error("Supabase or authenticated user is unavailable.")
-    };
-  }
-
-  const attempts = options.retry === false ? 1 : 3;
-  let lastError = null;
-
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, full_name, role")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (!error && data) {
-      return {
-        profile: data,
-        error: null
-      };
-    }
-
-    if (error) {
-      lastError = error;
-      console.error("Profile load error:", error);
-    } else if (!data) {
-      lastError = new Error(
-        `No dashboard profile was returned for authenticated user ${user.id}.`
-      );
-    }
-
-    if (attempt < attempts - 1) {
-      await new Promise(resolve => setTimeout(resolve, 350));
-    }
-  }
-
-  return {
-    profile: null,
-    error: lastError
-  };
-}
-
-/* =========================================================
-   APP
-========================================================= */
-
-function App() {
-  const [session, setSession] =
-    useState(null);
-
-  const [profile, setProfile] =
-    useState(null);
-
-  const [profileError, setProfileError] =
-    useState("");
-
-  const [data, setData] =
-    useState(null);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [dataLoading, setDataLoading] =
-    useState(false);
-
-  const [page, setPage] =
-    useState("dashboard");
-
-  const [query, setQuery] =
-    useState("");
-
-  const [sidebar, setSidebar] =
-    useState(true);
-
-  const [showAdd, setShowAdd] =
-    useState(false);
-
-  const [addType, setAddType] =
-    useState("team");
-
-  const [toast, setToast] =
-    useState("");
-
-  /* =======================================================
-     AUTH SESSION
-  ======================================================= */
-
-  useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
-
-    let mounted = true;
-
-    async function init() {
-      const {
-        data: sessionData
-      } = await supabase.auth.getSession();
-
-      if (!mounted) return;
-
-      const currentSession =
-        sessionData?.session || null;
-
-      setSession(currentSession);
-
-      if (currentSession?.user) {
-        const result = await getProfile(
-          currentSession.user
-        );
-
-        if (!mounted) return;
-
-        setProfile(result.profile);
-        setProfileError(
-          result.error?.message || ""
-        );
-      } else {
-        setProfile(null);
-        setProfileError("");
-      }
-
-      setLoading(false);
-    }
-
-    init();
-
-    const {
-      data: listener
-    } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
-        if (!mounted) return;
-
-        setSession(newSession);
-
-        if (newSession?.user) {
-          const result = await getProfile(
-            newSession.user
-          );
-
-          if (!mounted) return;
-
-          setProfile(result.profile);
-          setProfileError(
-            result.error?.message || ""
-          );
-        } else {
-          setProfile(null);
-          setProfileError("");
-          setData(null);
-        }
-      }
-    );
-
-    return () => {
-      mounted = false;
-      listener?.subscription?.unsubscribe();
-    };
-  }, []);
-
-  /* =======================================================
-     LOAD DASHBOARD DATA
-  ======================================================= */
-
-  useEffect(() => {
-    if (!session?.user) {
-      return;
-    }
-
-    let mounted = true;
-
-    async function load() {
-      setDataLoading(true);
-
-      try {
-        const result =
-          await loadOnlineData();
-
-        if (mounted) {
-          setData(result);
-        }
-      } catch (error) {
-        console.error(error);
-
-        if (mounted) {
-          setToast(
-            "Could not load online data"
-          );
-
-          setData(
-            loadLocalData()
-          );
-        }
-      } finally {
-        if (mounted) {
-          setDataLoading(false);
-        }
-      }
-    }
-
-    load();
-
-    return () => {
-      mounted = false;
-    };
-  }, [session]);
-
-  /* =======================================================
-     UPDATE DATA
-  ======================================================= */
-
-  const update = async next => {
-    setData(next);
-
-    try {
-      await saveOnlineData(next);
-
-      notify("Saved online");
-    } catch (error) {
-      console.error(error);
-
-      notify(
-        "Save failed. Check Supabase connection."
-      );
-    }
-  };
-
-  function notify(msg) {
-    setToast(msg);
-
-    setTimeout(
-      () => setToast(""),
-      2500
-    );
-  }
-
-  /* =======================================================
-     LOGOUT
-  ======================================================= */
-
-  async function logout() {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-
-    setSession(null);
-    setProfile(null);
-    setProfileError("");
-    setData(null);
-  }
-
-  /* =======================================================
-     NAVIGATION
-  ======================================================= */
-
-  const role =
-    profile?.role || "member";
-
-  const nav = [
-    [
-      "dashboard",
-      "Dashboard",
-      LayoutDashboard,
-      true
-    ],
-    [
-      "team",
-      "Team",
-      Users,
-      true
-    ],
-    [
-      "projects",
-      "Projects",
-      FolderKanban,
-      true
-    ],
-    [
-      "qa",
-      "QA & Reviews",
-      ClipboardCheck,
-      true
-    ],
-    [
-      "issues",
-      "Issues",
-      AlertTriangle,
-      true
-    ],
-    [
-      "analytics",
-      "Analytics",
-      BarChart3,
-      true
-    ],
-    [
-      "settings",
-      "Settings",
-      Settings,
-      true
-    ],
-    [
-      "sheet",
-      "Sheet Import",
-      Upload,
-      canEdit(role)
-    ]
-  ];
-
-  /* =======================================================
-     FILTERED TEAM
-  ======================================================= */
-
-  const filteredTeam =
-    useMemo(
-      () =>
-        (data?.team || []).filter(
-          x =>
-            String(
-              x.name || ""
-            )
-              .toLowerCase()
-              .includes(
-                query.toLowerCase()
-              )
-        ),
-      [data?.team, query]
-    );
-
-  /* =======================================================
-     TOTALS
-  ======================================================= */
-
-  const totals =
-    useMemo(() => {
-      const team =
-        data?.team || [];
-
-      const projects =
-        data?.projects || [];
-
-      const total =
-        team.reduce(
-          (s, x) =>
-            s +
-            (Number(x.target) ||
-              0),
-          0
-        );
-
-      const done =
-        team.reduce(
-          (s, x) =>
-            s +
-            (Number(
-              x.completed
-            ) || 0),
-          0
-        );
-
-      const reviewed =
-        team.reduce(
-          (s, x) =>
-            s +
-            (Number(
-              x.reviewed
-            ) || 0),
-          0
-        );
-
-      const remaining =
-        projects.reduce(
-          (s, x) =>
-            s +
-            getProjectStats(
-              x
-            ).remaining,
-          0
-        );
-
-      return {
-        total,
-        done,
-        reviewed,
-        remaining,
-        rate: total
-          ? Math.round(
-              (done / total) *
-                100
-            )
-          : 0
-      };
-    }, [data]);
-
-  /* =======================================================
-     ADD RECORD
-  ======================================================= */
-
-  async function addRecord(e) {
-    e.preventDefault();
-
-    if (!canEdit(role)) {
-      notify(
-        "You do not have permission."
-      );
-
-      return;
-    }
-
-    const f =
-      new FormData(
-        e.currentTarget
-      );
-
-    let next = {
-      ...data
-    };
-
-    if (
-      addType === "team"
-    ) {
-      const target =
-        Number(
-          f.get("target") ||
-            1000
-        );
-
-      next.team = [
-        ...(data.team || []),
-        {
-          id: Date.now(),
-          name: f.get("name"),
-          role: f.get("role"),
-          target,
-          completed: Number(
-            f.get(
-              "completed"
-            ) || 0
-          ),
-          reviewed: 0,
-          errors: 0,
-          status: "Active"
-        }
-      ];
-    } else if (
-      addType === "project"
-    ) {
-      const name =
-        String(
-          f.get("name") ||
-            ""
-        ).trim();
-
-      const target =
-        Number(
-          f.get("target") ||
-            0
-        );
-
-      const completed =
-        Number(
-          f.get(
-            "completed"
-          ) || 0
-        );
-
-      const remaining =
-        Math.max(
-          0,
-          target -
-            completed
-        );
-
-      next.projects = [
-        ...(data.projects ||
-          []),
-        {
-          id: Date.now(),
-          name,
-          total: target,
-          target,
-          completed,
-          remaining,
-          status:
-            getProjectStatus(
-              target,
-              completed,
-              remaining
-            ),
-          deadline:
-            f.get("deadline") ||
-            ""
-        }
-      ];
-    } else {
-      next.issues = [
-        ...(data.issues ||
-          []),
-        {
-          id: Date.now(),
-          type: f.get("type"),
-          project:
-            f.get("project"),
-          owner:
-            f.get("owner"),
-          severity:
-            f.get(
-              "severity"
-            ),
-          status: "Open",
-          date: new Date()
-            .toISOString()
-            .slice(0, 10)
-        }
-      ];
-    }
-
-    setShowAdd(false);
-
-    await update(next);
-  }
-
-  /* =======================================================
-     DELETE
-  ======================================================= */
-
-  async function remove(
-    kind,
-    id
-  ) {
-    if (!canDelete(role)) {
-      notify(
-        "Only Admin can delete records."
-      );
-
-      return;
-    }
-
-    if (
-      !confirm(
-        "Delete this record?"
-      )
-    ) {
-      return;
-    }
-
-    const next = {
-      ...data,
-      [kind]: (
-        data[kind] || []
-      ).filter(
-        x => x.id !== id
-      )
-    };
-
-    await update(next);
-  }
-
-  /* =======================================================
-     EXPORT
-  ======================================================= */
-
-  function exportData() {
-    const blob =
-      new Blob(
-        [
-          JSON.stringify(
-            data,
-            null,
-            2
-          )
-        ],
-        {
-          type:
-            "application/json"
-        }
-      );
-
-    const a =
-      document.createElement(
-        "a"
-      );
-
-    a.href =
-      URL.createObjectURL(
-        blob
-      );
-
-    a.download =
-      "annotatepro-backup.json";
-
-    a.click();
-
-    URL.revokeObjectURL(
-      a.href
-    );
-
-    notify(
-      "Backup exported"
-    );
-  }
-
-  /* =======================================================
-     IMPORT BACKUP
-  ======================================================= */
-
-  async function importData(e) {
-    if (!canEdit(role)) {
-      notify(
-        "You do not have permission."
-      );
-
-      return;
-    }
-
-    const file =
-      e.target.files?.[0];
-
-    if (!file) return;
-
-    const r =
-      new FileReader();
-
-    r.onload = async () => {
-      try {
-        const parsed =
-          JSON.parse(
-            r.result
-          );
-
-        if (
-          parsed.team &&
-          parsed.projects &&
-          parsed.issues
-        ) {
-          const projects =
-            parsed.projects.map(
-              p => {
-                const s =
-                  getProjectStats(
-                    p
-                  );
-
-                return {
-                  ...p,
-                  ...s,
-                  target:
-                    s.total,
-                  total:
-                    s.total
-                };
-              }
-            );
-
-          await update({
-            ...parsed,
-            projects
-          });
-        } else {
-          alert(
-            "Invalid dashboard backup"
-          );
-        }
-      } catch {
-        alert(
-          "Invalid JSON file"
-        );
-      }
-    };
-
-    r.readAsText(file);
-
-    e.target.value = "";
-  }
-
-  /* =======================================================
-     LOADING
-  ======================================================= */
-
-  if (loading) {
-    return (
-      <div className="app">
-        <div
-          style={{
-            minHeight:
-              "100vh",
-            display: "flex",
-            alignItems:
-              "center",
-            justifyContent:
-              "center"
-          }}
-        >
-          <div
-            style={{
-              textAlign:
-                "center"
-            }}
-          >
-            <RefreshCw
-              size={28}
-              className="spin"
-            />
-
-            <p>
-              Loading AnnotatePro...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /* =======================================================
-     SUPABASE CONFIG ERROR
-  ======================================================= */
-
-  if (!isSupabaseConfigured) {
-    return (
-      <div className="app">
-        <div
-          style={{
-            minHeight:
-              "100vh",
-            display: "flex",
-            alignItems:
-              "center",
-            justifyContent:
-              "center",
-            padding: "24px"
-          }}
-        >
-          <div
-            className="panel"
-            style={{
-              maxWidth:
-                "600px"
-            }}
-          >
-            <h2>
-              Supabase is not configured
-            </h2>
-
-            <p className="muted">
-              Add the VITE_SUPABASE_URL
-              and
-              VITE_SUPABASE_ANON_KEY
-              environment variables
-              in Vercel, then redeploy.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /* =======================================================
-     LOGIN
-  ======================================================= */
-
-  if (!session) {
-    return (
-      <Login
-        onLoggedIn={user => {
-          setSession({
-            user
-          });
-        }}
-      />
-    );
-  }
-
-  /* =======================================================
-     PROFILE ERROR
-  ======================================================= */
-
-  if (!profile) {
-    return (
-      <div className="app">
-        <div
-          style={{
-            minHeight:
-              "100vh",
-            display: "flex",
-            alignItems:
-              "center",
-            justifyContent:
-              "center",
-            padding: "24px"
-          }}
-        >
-          <div
-            className="panel"
-            style={{
-              maxWidth:
-                "600px"
-            }}
-          >
-            <ShieldCheck
-              size={32}
-            />
-
-            <h2>
-              Profile not found
-            </h2>
-
-            <p className="muted">
-              Your Supabase user exists, but the
-              dashboard could not read the matching
-              profile from the <b>profiles</b> table.
-            </p>
-
-            {profileError && (
-              <div
-                style={{
-                  margin: "16px 0",
-                  padding: "12px",
-                  borderRadius: "10px",
-                  background: "#fff7ed",
-                  color: "#9a3412",
-                  fontSize: "13px",
-                  lineHeight: 1.5,
-                  wordBreak: "break-word"
-                }}
-              >
-                <strong>Profile read error:</strong>{" "}
-                {profileError}
-              </div>
-            )}
-
-            <p className="muted" style={{ fontSize: "13px" }}>
-              If the profile row exists in Supabase, this usually
-              means the table's Row Level Security policy is not
-              allowing the signed-in user to read their own row.
-            </p>
-
-            <button
-              className="secondary"
-              onClick={logout}
-            >
-              <LogOut
-                size={17}
-              />
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /* =======================================================
-     DATA LOADING
-  ======================================================= */
-
-  if (
-    dataLoading ||
-    !data
-  ) {
-    return (
-      <div className="app">
-        <div
-          style={{
-            minHeight:
-              "100vh",
-            display: "flex",
-            alignItems:
-              "center",
-            justifyContent:
-              "center"
-          }}
-        >
-          <div
-            style={{
-              textAlign:
-                "center"
-            }}
-          >
-            <RefreshCw
-              size={28}
-            />
-
-            <p>
-              Loading online dashboard...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /* =======================================================
-     MAIN UI
-  ======================================================= */
-
-  return (
-    <div className="app">
-      <aside
-        className={
-          "sidebar " +
-          (!sidebar
-            ? "collapsed"
-            : "")
-        }
-      >
-        <div className="brand">
-          <div className="brand-mark">
-            A
-          </div>
-
-          {sidebar && (
-            <div>
-              <b>
-                AnnotatePro
-              </b>
-
-              <span>
-                Team Operations
-              </span>
-            </div>
-          )}
-        </div>
-
-        <nav>
-          {nav
-            .filter(
-              item => item[3]
-            )
-            .map(
-              ([
-                key,
-                label,
-                Icon
-              ]) => (
-                <button
-                  key={key}
-                  className={
-                    page === key
-                      ? "active"
-                      : ""
-                  }
-                  onClick={() =>
-                    setPage(
-                      key
-                    )
-                  }
-                >
-                  <Icon
-                    size={19}
-                  />
-
-                  {sidebar && (
-                    <span>
-                      {label}
-                    </span>
-                  )}
-                </button>
-              )
-            )}
-        </nav>
-
-        {sidebar && (
-          <div className="side-card">
-            <ShieldCheck
-              size={20}
-            />
-
-            <b>
-              {role === "admin"
-                ? "Administrator"
-                : role ===
-                  "team_lead"
-                ? "Team Lead"
-                : "Team Member"}
-            </b>
-
-            <p>
-              {role === "admin"
-                ? "Full dashboard control."
-                : role ===
-                  "team_lead"
-                ? "Manage team operations."
-                : "Dashboard read-only access."}
-            </p>
-          </div>
-        )}
-
-        <button
-          className="collapse"
-          onClick={() =>
-            setSidebar(
-              !sidebar
-            )
-          }
-        >
-          {sidebar ? (
-            <ChevronRight
-              size={18}
-            />
-          ) : (
-            <Menu
-              size={18}
-            />
-          )}
-
-          <span>
-            {sidebar
-              ? "Collapse"
-              : "Expand"}
-          </span>
-        </button>
-      </aside>
-
-      <main className="main">
-        <header className="topbar">
-          <div
-            className="mobile-menu"
-            onClick={() =>
-              setSidebar(
-                !sidebar
-              )
-            }
-          >
-            <Menu />
-          </div>
-
-          <div className="search">
-            <Search
-              size={18}
-            />
-
-            <input
-              placeholder="Search team members..."
-              value={query}
-              onChange={e =>
-                setQuery(
-                  e.target.value
-                )
-              }
-            />
-          </div>
-
-          <div className="top-actions">
-            <button className="icon-btn">
-              <Bell
-                size={19}
-              />
-
-              <i />
-            </button>
-
-            <div className="avatar">
-              {(
-                profile.full_name ||
-                session.user.email ||
-                "U"
-              )
-                .slice(0, 2)
-                .toUpperCase()}
-            </div>
-
-            <div className="user">
-              <b>
-                {profile.full_name ||
-                  session.user.email}
-              </b>
-
-              <span>
-                {role ===
-                "team_lead"
-                  ? "Team Lead"
-                  : role ===
-                    "admin"
-                  ? "Admin"
-                  : "Member"}
-              </span>
-            </div>
-
-            <button
-              className="icon-btn"
-              title="Logout"
-              onClick={logout}
-            >
-              <LogOut
-                size={19}
-              />
-            </button>
-          </div>
-        </header>
-
-        <section className="content">
-          {page ===
-            "dashboard" && (
-            <Dashboard
-              totals={totals}
-              data={data}
-              setPage={setPage}
-            />
-          )}
-
-          {page === "team" && (
-            <Team
-              rows={
-                filteredTeam
-              }
-              data={data}
-              role={role}
-              openAdd={() => {
-                if (
-                  !canEdit(
-                    role
-                  )
-                ) {
-                  notify(
-                    "You do not have permission."
-                  );
-
-                  return;
-                }
-
-                setAddType(
-                  "team"
-                );
-
-                setShowAdd(
-                  true
-                );
-              }}
-              remove={
-                canDelete(role)
-                  ? remove
-                  : null
-              }
-            />
-          )}
-
-          {page ===
-            "projects" && (
-            <Projects
-              rows={
-                data.projects
-              }
-              remove={
-                canDelete(role)
-                  ? remove
-                  : null
-              }
-              openAdd={() => {
-                if (
-                  !canManageProjects(
-                    role
-                  )
-                ) {
-                  notify(
-                    "You do not have permission."
-                  );
-
-                  return;
-                }
-
-                setAddType(
-                  "project"
-                );
-
-                setShowAdd(
-                  true
-                );
-              }}
-              role={role}
-            />
-          )}
-
-          {page === "qa" && (
-            <QA
-              data={data}
-            />
-          )}
-
-          {page ===
-            "issues" && (
-            <Issues
-              rows={
-                data.issues
-              }
-              remove={
-                canDelete(role)
-                  ? remove
-                  : null
-              }
-              openAdd={() => {
-                if (
-                  !canManageIssues(
-                    role
-                  )
-                ) {
-                  notify(
-                    "You do not have permission."
-                  );
-
-                  return;
-                }
-
-                setAddType(
-                  "issue"
-                );
-
-                setShowAdd(
-                  true
-                );
-              }}
-            />
-          )}
-
-          {page ===
-            "analytics" && (
-            <Analytics
-              data={data}
-            />
-          )}
-
-          {page ===
-            "settings" && (
-            <SettingsPage
-              exportData={
-                exportData
-              }
-              importData={
-                importData
-              }
-              role={role}
-              online
-            />
-          )}
-
-          {page === "sheet" &&
-            canEdit(role) && (
-              <SheetImport
-                data={data}
-                update={update}
-                notify={notify}
-              />
-            )}
-        </section>
-      </main>
-
-      {showAdd && (
-        <Modal
-          type={addType}
-          onClose={() =>
-            setShowAdd(false)
-          }
-          onSubmit={
-            addRecord
-          }
-        />
-      )}
-
-      {toast && (
-        <div className="toast">
-          <CheckCircle2
-            size={18}
-          />
-
-          {toast}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* =========================================================
    DASHBOARD
 ========================================================= */
-
-function Dashboard({
-  totals,
-  data,
-  setPage
-}) {
-  const active =
-    data.team.filter(
-      x =>
-        x.status ===
-        "Active"
-    ).length;
-
-  const openIssues =
-    data.issues.filter(
-      x =>
-        x.status ===
-        "Open"
-    ).length;
-
-  const completion =
-    totals.total
-      ? Math.round(
-          (totals.done /
-            totals.total) *
-            100
-        )
-      : 0;
+function Dashboard({ totals, data, setPage }) {
+  const active = data.team.filter(x => x.status === "Active").length;
+  const openIssues = data.issues.filter(x => x.status === "Open").length;
+  const completion = totals.total
+    ? Math.round((totals.done / totals.total) * 100)
+    : 0;
 
   return (
     <div>
       <div className="page-head">
         <div>
-          <p className="eyebrow">
-            TEAM OPERATIONS
-          </p>
-
-          <h1>
-            Good evening,
-            Manjunath 👋
-          </h1>
-
+          <p className="eyebrow">TEAM OPERATIONS</p>
+          <h1>Good evening, Manjunath 👋</h1>
           <p className="sub">
-            Here’s your team's
-            operational overview
-            for today.
+            Here’s your team's operational overview for today.
           </p>
         </div>
 
-        <button
-          className="primary"
-          onClick={() =>
-            setPage("team")
-          }
-        >
-          <Users
-            size={18}
-          />
+        <button className="primary" onClick={() => setPage("team")}>
+          <Users size={18} />
           Manage team
         </button>
       </div>
@@ -2287,7 +1509,6 @@ function Dashboard({
           note={`${completion}% of target`}
           trend="+8.4%"
         />
-
         <Metric
           icon={ImageIcon}
           label="Images remaining"
@@ -2295,7 +1516,6 @@ function Dashboard({
           note="Across active projects"
           trend="-12.2%"
         />
-
         <Metric
           icon={Users}
           label="Active team"
@@ -2303,124 +1523,62 @@ function Dashboard({
           note={`${data.team.length} total members`}
           trend="Live"
         />
-
         <Metric
           icon={AlertTriangle}
           label="Open issues"
           value={openIssues}
           note="Needs attention"
-          trend={
-            openIssues
-              ? "Action"
-              : "Clear"
-          }
+          trend={openIssues ? "Action" : "Clear"}
         />
       </div>
 
       <div className="grid two">
-        <Panel
-          title="Team performance"
-          action="View all"
-          onAction={() =>
-            setPage("team")
-          }
-        >
+        <Panel title="Team performance" action="View all" onAction={() => setPage("team")}>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>
-                    Member
-                  </th>
-                  <th>
-                    Progress
-                  </th>
-                  <th>
-                    Completed
-                  </th>
-                  <th>
-                    Status
-                  </th>
+                  <th>Member</th>
+                  <th>Progress</th>
+                  <th>Completed</th>
+                  <th>Status</th>
                 </tr>
               </thead>
-
               <tbody>
-                {data.team
-                  .slice(
-                    0,
-                    5
-                  )
-                  .map(
-                    x => (
-                      <tr
-                        key={
-                          x.id
+                {data.team.slice(0, 5).map(x => (
+                  <tr key={x.id}>
+                    <td>
+                      <div className="person">
+                        <div className="mini-avatar">
+                          {x.name.slice(0, 1)}
+                        </div>
+                        <div>
+                          <b>{x.name}</b>
+                          <small>{x.role}</small>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <Progress
+                        value={
+                          x.target
+                            ? Math.min(
+                                100,
+                                Math.round((x.completed / x.target) * 100)
+                              )
+                            : 0
                         }
-                      >
-                        <td>
-                          <div className="person">
-                            <div className="mini-avatar">
-                              {x.name.slice(
-                                0,
-                                1
-                              )}
-                            </div>
-
-                            <div>
-                              <b>
-                                {
-                                  x.name
-                                }
-                              </b>
-
-                              <small>
-                                {
-                                  x.role
-                                }
-                              </small>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td>
-                          <Progress
-                            value={
-                              x.target
-                                ? Math.min(
-                                    100,
-                                    Math.round(
-                                      (x.completed /
-                                        x.target) *
-                                        100
-                                    )
-                                  )
-                                : 0
-                            }
-                          />
-                        </td>
-
-                        <td>
-                          <b>
-                            {Number(
-                              x.completed
-                            ).toLocaleString()}
-                          </b>{" "}
-                          /{" "}
-                          {Number(
-                            x.target
-                          ).toLocaleString()}
-                        </td>
-
-                        <td>
-                          <Status
-                            text={
-                              x.status
-                            }
-                          />
-                        </td>
-                      </tr>
-                    )
-                  )}
+                      />
+                    </td>
+                    <td>
+                      <b>{Number(x.completed).toLocaleString()}</b> /{" "}
+                      {Number(x.target).toLocaleString()}
+                    </td>
+                    <td>
+                      <Status text={x.status} />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -2429,64 +1587,35 @@ function Dashboard({
         <Panel
           title="Project progress"
           action="View projects"
-          onAction={() =>
-            setPage(
-              "projects"
-            )
-          }
+          onAction={() => setPage("projects")}
         >
           <div className="project-list">
-            {data.projects.map(
-              p => {
-                const s =
-                  getProjectStats(
-                    p
-                  );
+            {data.projects.map(p => {
+              const s = getProjectStats(p);
 
-                return (
-                  <div
-                    className="project-row"
-                    key={
-                      p.id
-                    }
-                  >
-                    <div className="project-icon">
-                      <FolderKanban
-                        size={18}
-                      />
-                    </div>
-
-                    <div className="grow">
-                      <div className="row-title">
-                        <b>
-                          {
-                            p.name
-                          }
-                        </b>
-
-                        <span>
-                          {s.total
-                            ? `${s.progress}%`
-                            : "No target"}
-                        </span>
-                      </div>
-
-                      <Progress
-                        value={
-                          s.progress
-                        }
-                      />
-
-                      <small>
-                        {s.total
-                          ? `${s.remaining.toLocaleString()} images remaining`
-                          : "Set a daily target"}
-                      </small>
-                    </div>
+              return (
+                <div className="project-row" key={p.id}>
+                  <div className="project-icon">
+                    <FolderKanban size={18} />
                   </div>
-                );
-              }
-            )}
+
+                  <div className="grow">
+                    <div className="row-title">
+                      <b>{p.name}</b>
+                      <span>{s.total ? `${s.progress}%` : "No target"}</span>
+                    </div>
+
+                    <Progress value={s.progress} />
+
+                    <small>
+                      {s.total
+                        ? `${s.remaining.toLocaleString()} images remaining`
+                        : "Set a daily target"}
+                    </small>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </Panel>
       </div>
@@ -2495,117 +1624,57 @@ function Dashboard({
         <Panel title="QA snapshot">
           <div className="big-number">
             {data.team
-              .reduce(
-                (
-                  s,
-                  x
-                ) =>
-                  s +
-                  (Number(
-                    x.reviewed
-                  ) ||
-                    0),
-                0
-              )
+              .reduce((s, x) => s + (Number(x.reviewed) || 0), 0)
               .toLocaleString()}
           </div>
-
-          <p className="muted">
-            Images reviewed
-          </p>
-
+          <p className="muted">Images reviewed</p>
           <div className="qa-line">
-            <span>
-              Accuracy health
-            </span>
-
-            <b>
-              96.8%
-            </b>
+            <span>Accuracy health</span>
+            <b>96.8%</b>
           </div>
-
-          <Progress
-            value={97}
-          />
+          <Progress value={97} />
         </Panel>
 
         <Panel title="Today's activity">
           <div className="activity">
             <Activity />
-
             <div>
-              <b>
-                {totals.done.toLocaleString()}
-              </b>
-
-              <span>
-                images completed
-              </span>
+              <b>{totals.done.toLocaleString()}</b>
+              <span>images completed</span>
             </div>
           </div>
 
           <div className="activity">
             <CheckCircle2 />
-
             <div>
-              <b>
-                {totals.reviewed.toLocaleString()}
-              </b>
-
-              <span>
-                reviews completed
-              </span>
+              <b>{totals.reviewed.toLocaleString()}</b>
+              <span>reviews completed</span>
             </div>
           </div>
 
           <div className="activity">
             <AlertTriangle />
-
             <div>
-              <b>
-                {openIssues}
-              </b>
-
-              <span>
-                issues open
-              </span>
+              <b>{openIssues}</b>
+              <span>issues open</span>
             </div>
           </div>
         </Panel>
 
         <Panel title="Quick actions">
-          <button
-            className="quick"
-            onClick={() =>
-              setPage("team")
-            }
-          >
+          <button className="quick" onClick={() => setPage("team")}>
             <Users />
             Update team progress
             <ChevronRight />
           </button>
 
-          <button
-            className="quick"
-            onClick={() =>
-              setPage(
-                "issues"
-              )
-            }
-          >
+          <button className="quick" onClick={() => setPage("issues")}>
             <AlertTriangle />
             Review open issues
             <ChevronRight />
           </button>
 
-          <button
-            className="quick"
-            onClick={() =>
-              setPage(
-                "settings"
-              )
-            }
-          >
+          <button className="quick" onClick={() => setPage("settings")}>
             <Download />
             Backup dashboard
             <ChevronRight />
@@ -2619,81 +1688,43 @@ function Dashboard({
 /* =========================================================
    COMMON UI
 ========================================================= */
-
-function Metric({
-  icon: Icon,
-  label,
-  value,
-  note,
-  trend
-}) {
+function Metric({ icon: Icon, label, value, note, trend }) {
   return (
     <div className="metric">
       <div className="metric-top">
         <div className="metric-icon">
-          <Icon
-            size={20}
-          />
+          <Icon size={20} />
         </div>
-
-        <span className="trend">
-          {trend}
-        </span>
+        <span className="trend">{trend}</span>
       </div>
-
-      <h2>
-        {value}
-      </h2>
-
-      <b>
-        {label}
-      </b>
-
-      <small>
-        {note}
-      </small>
+      <h2>{value}</h2>
+      <b>{label}</b>
+      <small>{note}</small>
     </div>
   );
 }
 
-function Progress({
-  value
-}) {
+function Progress({ value }) {
   return (
     <div className="progress">
       <span
         style={{
-          width: `${Math.max(
-            0,
-            Math.min(
-              100,
-              Number(
-                value
-              ) || 0
-            )
-          )}%`
+          width: `${Math.max(0, Math.min(100, Number(value) || 0))}%`
         }}
       />
     </div>
   );
 }
 
-function Status({
-  text
-}) {
+function Status({ text }) {
   return (
     <span
       className={
         "status " +
-        String(
-          text || ""
-        )
+        String(text || "")
           .toLowerCase()
-          .replaceAll(
-            " ",
-            "-"
-          )
-      }
+          .replaceAll(" ", "-")
+    }
     >
       <i />
       {text}
@@ -2701,35 +1732,18 @@ function Status({
   );
 }
 
-function Panel({
-  title,
-  action,
-  onAction,
-  children
-}) {
+function Panel({ title, action, onAction, children }) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <h3>
-          {title}
-        </h3>
-
+        <h3>{title}</h3>
         {action && (
-          <button
-            className="link-btn"
-            onClick={
-              onAction
-            }
-          >
+          <button className="link-btn" onClick={onAction}>
             {action}
-
-            <ChevronRight
-              size={15}
-            />
+            <ChevronRight size={15} />
           </button>
         )}
       </div>
-
       {children}
     </div>
   );
@@ -2738,248 +1752,107 @@ function Panel({
 /* =========================================================
    TEAM
 ========================================================= */
+function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
+  const projectRows = useMemo(() => {
+    const records = Array.isArray(data.sheetRecords)
+      ? data.sheetRecords
+      : [];
 
-function Team({
-  rows,
-  data,
-  role,
-  openAdd,
-  remove
-}) {
-  const projectRows =
-    useMemo(() => {
-      const records =
-        Array.isArray(
-          data.sheetRecords
-        )
-          ? data.sheetRecords
-          : [];
+    if (!records.length) {
+      return rows.map(x => ({
+        id: `member-${x.id}`,
+        name: x.name,
+        project: "—",
+        role: x.role,
+        target: Number(x.target) || 0,
+        completed: Number(x.completed) || 0,
+        reviewed: Number(x.reviewed) || 0,
+        errors: Number(x.errors) || 0,
+        status: x.status || "Active"
+      }));
+    }
 
-      if (!records.length) {
-        return rows.map(
-          x => ({
-            id: `member-${x.id}`,
-            name: x.name,
-            project: "—",
-            role: x.role,
-            target:
-              Number(
-                x.target
-              ) || 0,
-            completed:
-              Number(
-                x.completed
-              ) || 0,
-            reviewed:
-              Number(
-                x.reviewed
-              ) || 0,
-            errors:
-              Number(
-                x.errors
-              ) || 0,
-            status:
-              x.status ||
-              "Active"
-          })
-        );
+    const dates = [
+      ...new Set(records.map(x => x.date).filter(Boolean))
+    ].sort();
+
+    const latestDate = dates[dates.length - 1];
+
+    const latestRecords = records.filter(
+      x =>
+        x.date === latestDate &&
+        x.project &&
+        !["Saturday", "Sunday", "On Leave"].includes(x.project)
+    );
+
+    const grouped = {};
+
+    latestRecords.forEach(record => {
+      const name = String(record.name || "").trim();
+      const project = getConfiguredProjectName(record.project);
+
+      if (!name || !project) return;
+
+      const type = String(record.type || "").trim();
+      const role = /review/i.test(type) ? "Reviewer" : "Annotator";
+      const key = `${name}|||${project}|||${role}`;
+
+      if (!grouped[key]) {
+        grouped[key] = {
+          id: key,
+          name,
+          project,
+          role,
+          target: Number(projectTargets[project]) || 0,
+          completed: 0,
+          reviewed: 0,
+          errors: 0,
+          status: "Active"
+        };
       }
 
-      const dates = [
-        ...new Set(
-          records
-            .map(
-              x =>
-                x.date
-            )
-            .filter(
-              Boolean
-            )
-        )
-      ].sort();
+      const worked = Number(record.worked) || 0;
+      grouped[key].completed += worked;
 
-      const latestDate =
-        dates[
-          dates.length -
-            1
-        ];
+      if (/review/i.test(type)) {
+        grouped[key].reviewed += worked;
+      }
+    });
 
-      const latestRecords =
-        records.filter(
-          x =>
-            x.date ===
-              latestDate &&
-            x.project &&
-            ![
-              "Saturday",
-              "Sunday",
-              "On Leave"
-            ].includes(
-              x.project
-            )
-        );
+    const result = Object.values(grouped);
 
-      const grouped =
-        {};
-
-      latestRecords.forEach(
-        record => {
-          const name =
-            String(
-              record.name ||
-                ""
-            ).trim();
-
-          const project =
-            getConfiguredProjectName(
-              record.project
-            );
-
-          if (
-            !name ||
-            !project
-          ) {
-            return;
-          }
-
-          const type =
-            String(
-              record.type ||
-                ""
-            ).trim();
-
-          const recordRole =
-            /review/i.test(
-              type
-            )
-              ? "Reviewer"
-              : "Annotator";
-
-          const key = `${name}|||${project}|||${recordRole}`;
-
-          if (
-            !grouped[
-              key
-            ]
-          ) {
-            grouped[
-              key
-            ] = {
-              id: key,
-              name,
-              project,
-              role: recordRole,
-              target:
-                Number(
-                  projectTargets[
-                    project
-                  ]
-                ) || 0,
-              completed: 0,
-              reviewed: 0,
-              errors: 0,
-              status:
-                "Active"
-            };
-          }
-
-          const worked =
-            Number(
-              record.worked
-            ) || 0;
-
-          grouped[
-            key
-          ].completed +=
-            worked;
-
-          if (
-            /review/i.test(
-              type
-            )
-          ) {
-            grouped[
-              key
-            ].reviewed +=
-              worked;
-          }
-        }
+    rows.forEach(member => {
+      const exists = result.some(
+        x => x.name.toLowerCase() === member.name.toLowerCase()
       );
 
-      const result =
-        Object.values(
-          grouped
-        );
+      if (!exists) {
+        result.push({
+          id: `member-${member.id}`,
+          name: member.name,
+          project: "—",
+          role: member.role,
+          target: Number(member.target) || 0,
+          completed: Number(member.completed) || 0,
+          reviewed: Number(member.reviewed) || 0,
+          errors: Number(member.errors) || 0,
+          status: member.status || "Active"
+        });
+      }
+    });
 
-      rows.forEach(
-        member => {
-          const exists =
-            result.some(
-              x =>
-                x.name.toLowerCase() ===
-                member.name.toLowerCase()
-            );
-
-          if (!exists) {
-            result.push({
-              id: `member-${member.id}`,
-              name: member.name,
-              project: "—",
-              role: member.role,
-              target:
-                Number(
-                  member.target
-                ) || 0,
-              completed:
-                Number(
-                  member.completed
-                ) || 0,
-              reviewed:
-                Number(
-                  member.reviewed
-                ) || 0,
-              errors:
-                Number(
-                  member.errors
-                ) || 0,
-              status:
-                member.status ||
-                "Active"
-            });
-          }
-        }
-      );
-
-      return result;
-    }, [
-      data.sheetRecords,
-      rows
-    ]);
+    return result;
+  }, [data.sheetRecords, rows]);
 
   const imported =
-    Array.isArray(
-      data.sheetRecords
-    ) &&
-    data.sheetRecords
-      .length > 0;
+    Array.isArray(data.sheetRecords) &&
+    data.sheetRecords.length > 0;
 
-  const latestDate =
-    imported
-      ? [
-          ...new Set(
-            data.sheetRecords
-              .map(
-                x =>
-                  x.date
-              )
-              .filter(
-                Boolean
-              )
-          )
-        ]
-          .sort()
-          .pop()
-      : null;
+  const latestDate = imported
+    ? [...new Set(data.sheetRecords.map(x => x.date).filter(Boolean))]
+        .sort()
+        .pop()
+    : null;
 
   return (
     <Page
@@ -2987,233 +1860,101 @@ function Team({
       subtitle={
         imported
           ? `Daily project-wise productivity from imported sheet${
-              latestDate
-                ? ` • ${latestDate}`
-                : ""
+              latestDate ? ` • ${latestDate}` : ""
             }.`
           : "Monitor individual productivity, targets and quality."
       }
-      action={
-        role === "member"
-          ? null
-          : "+ Add member"
-      }
-      onAction={
-        openAdd
-      }
+      action={canManage ? "+ Add member" : undefined}
+      onAction={openAdd}
     >
-      <Panel
-        title={`${projectRows.length} records`}
-      >
+      <Panel title={`${projectRows.length} records`}>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>
-                  Member
-                </th>
-
-                <th>
-                  Project
-                </th>
-
-                <th>
-                  Role
-                </th>
-
-                <th>
-                  Target
-                </th>
-
-                <th>
-                  Completed
-                </th>
-
-                <th>
-                  Progress
-                </th>
-
-                <th>
-                  Reviewed
-                </th>
-
-                <th>
-                  Errors
-                </th>
-
-                <th>
-                  Status
-                </th>
-
-                {remove && (
-                  <th>
-                    Action
-                  </th>
-                )}
+                <th>Member</th>
+                <th>Project</th>
+                <th>Role</th>
+                <th>Target</th>
+                <th>Completed</th>
+                <th>Progress</th>
+                <th>Reviewed</th>
+                <th>Errors</th>
+                <th>Status</th>
+                {canManage && <th>Actions</th>}
               </tr>
             </thead>
 
             <tbody>
-              {projectRows.map(
-                x => {
-                  const target =
-                    Number(
-                      x.target
-                    ) || 0;
+              {projectRows.map(x => {
+                const target = Number(x.target) || 0;
+                const completed = Number(x.completed) || 0;
+                const progress = target
+                  ? Math.min(100, Math.round((completed / target) * 100))
+                  : 0;
 
-                  const completed =
-                    Number(
-                      x.completed
-                    ) || 0;
-
-                  const progress =
-                    target
-                      ? Math.min(
-                          100,
-                          Math.round(
-                            (completed /
-                              target) *
-                              100
-                          )
-                        )
-                      : 0;
-
-                  return (
-                    <tr
-                      key={
-                        x.id
-                      }
-                    >
-                      <td>
-                        <div className="person">
-                          <div className="mini-avatar">
-                            {x.name
-                              .slice(
-                                0,
-                                1
-                              )
-                              .toUpperCase()}
-                          </div>
-
-                          <b>
-                            {
-                              x.name
-                            }
-                          </b>
+                return (
+                  <tr key={x.id}>
+                    <td>
+                      <div className="person">
+                        <div className="mini-avatar">
+                          {x.name.slice(0, 1).toUpperCase()}
                         </div>
-                      </td>
+                        <b>{x.name}</b>
+                      </div>
+                    </td>
 
-                      <td>
-                        <b>
-                          {
-                            x.project
-                          }
-                        </b>
-                      </td>
+                    <td><b>{x.project}</b></td>
+                    <td>{x.role}</td>
+                    <td>{target ? target.toLocaleString() : "—"}</td>
+                    <td><b>{completed.toLocaleString()}</b></td>
 
-                      <td>
-                        {
-                          x.role
+                    <td>
+                      <div style={{ minWidth: "100px" }}>
+                        <Progress value={progress} />
+                        <small style={{ display: "block", marginTop: "4px" }}>
+                          {progress}%
+                        </small>
+                      </div>
+                    </td>
+
+                    <td>{Number(x.reviewed).toLocaleString()}</td>
+
+                    <td>
+                      <span className={x.errors > 15 ? "danger-text" : "good-text"}>
+                        {x.errors}
+                      </span>
+                    </td>
+
+                    <td>
+                      <Status
+                        text={
+                          target && progress >= 100
+                            ? "Completed"
+                            : x.status
                         }
-                      </td>
+                      />
+                    </td>
 
+                    {canManage && (
                       <td>
-                        {target
-                          ? target.toLocaleString()
-                          : "—"}
-                      </td>
-
-                      <td>
-                        <b>
-                          {completed.toLocaleString()}
-                        </b>
-                      </td>
-
-                      <td>
-                        <div
-                          style={{
-                            minWidth:
-                              "100px"
-                          }}
-                        >
-                          <Progress
-                            value={
-                              progress
-                            }
-                          />
-
-                          <small
-                            style={{
-                              display:
-                                "block",
-                              marginTop:
-                                "4px"
+                        <div className="row-actions">
+                          <button
+                            className="secondary compact-btn"
+                            onClick={() => {
+                              const member = data.team.find(m => String(m.name).toLowerCase() === String(x.name).toLowerCase());
+                              onEdit(member || { id: x.id, name: x.name, role: x.role, target: target, completed, reviewed: Number(x.reviewed) || 0, errors: Number(x.errors) || 0, status: x.status || "Active" });
                             }}
-                          >
-                            {
-                              progress
-                            }
-                            %
-                          </small>
+                          >Edit</button>
+                          <button className="delete" onClick={() => onDelete(x.name)} title={`Delete ${x.name}`}>
+                            <Trash2 size={16} />
+                          </button>
                         </div>
                       </td>
-
-                      <td>
-                        {Number(
-                          x.reviewed
-                        ).toLocaleString()}
-                      </td>
-
-                      <td>
-                        <span
-                          className={
-                            x.errors >
-                            15
-                              ? "danger-text"
-                              : "good-text"
-                          }
-                        >
-                          {
-                            x.errors
-                          }
-                        </span>
-                      </td>
-
-                      <td>
-                        <Status
-                          text={
-                            target &&
-                            progress >=
-                              100
-                              ? "Completed"
-                              : x.status
-                          }
-                        />
-                      </td>
-
-                      {remove && (
-                        <td>
-                          <button
-                            className="delete"
-                            onClick={() =>
-                              remove(
-                                "team",
-                                x.id
-                              )
-                            }
-                          >
-                            <Trash2
-                              size={
-                                16
-                              }
-                            />
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                }
-              )}
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -3225,124 +1966,89 @@ function Team({
 /* =========================================================
    PROJECTS
 ========================================================= */
-
-function Projects({
-  rows,
-  remove,
-  openAdd,
-  role
-}) {
+function Projects({ rows, remove, openAdd, openEdit, canManage }) {
   return (
     <Page
       title="Projects"
       subtitle="Track workload, daily targets and completion across projects."
-      action={
-        canManageProjects(
-          role
-        )
-          ? "+ Add project"
-          : null
-      }
+      action={canManage ? "+ Add project" : undefined}
       onAction={openAdd}
     >
       <div className="project-cards">
-        {rows.map(
-          p => {
-            const s =
-              getProjectStats(
-                p
-              );
+        {rows.map(p => {
+          const s = getProjectStats(p);
 
-            return (
-              <div
-                className="project-card"
-                key={
-                  p.id
-                }
-              >
-                <div className="project-card-top">
-                  <div className="project-icon">
-                    <FolderKanban />
-                  </div>
+          return (
+            <div className="project-card" key={p.id}>
+              <div className="project-card-top">
+                <div className="project-icon">
+                  <FolderKanban />
+                </div>
 
-                  {remove && (
+                {canManage && (
+                  <div className="project-card-actions">
+                    <button
+                      className="icon-btn project-edit-btn"
+                      type="button"
+                      title="Edit project"
+                      aria-label={`Edit ${p.name}`}
+                      onClick={() => openEdit(p)}
+                    >
+                      <Pencil size={16} />
+                    </button>
+
                     <button
                       className="delete"
-                      onClick={() =>
-                        remove(
-                          "projects",
-                          p.id
-                        )
-                      }
+                      type="button"
+                      title="Delete project"
+                      aria-label={`Delete ${p.name}`}
+                      onClick={() => remove("projects", p.id)}
                     >
-                      <Trash2
-                        size={
-                          16
-                        }
-                      />
+                      <Trash2 size={16} />
                     </button>
-                  )}
-                </div>
-
-                <h3>
-                  {
-                    p.name
-                  }
-                </h3>
-
-                <Status
-                  text={
-                    s.status
-                  }
-                />
-
-                <div className="pc-stat">
-                  <span>
-                    Daily target
-                  </span>
-
-                  <b>
-                    {s.total
-                      ? s.total.toLocaleString()
-                      : "—"}
-                  </b>
-                </div>
-
-                <div className="pc-stat">
-                  <span>
-                    Completion
-                  </span>
-
-                  <b>
-                    {s.total
-                      ? `${s.progress}%`
-                      : "—"}
-                  </b>
-                </div>
-
-                <Progress
-                  value={
-                    s.progress
-                  }
-                />
-
-                <div className="pc-foot">
-                  <span>
-                    {s.total
-                      ? `${s.remaining.toLocaleString()} remaining`
-                      : "Set target"}
-                  </span>
-
-                  <span>
-                    Due{" "}
-                    {p.deadline ||
-                      "—"}
-                  </span>
-                </div>
+                  </div>
+                )}
               </div>
-            );
-          }
-        )}
+
+              <h3>{p.name}</h3>
+
+              {/* Status and remaining images are calculated automatically from total images and completed values */}
+              <Status text={s.status} />
+
+              <div className="pc-stat">
+                <span>Total images</span>
+                <b>{s.total ? s.total.toLocaleString() : "—"}</b>
+              </div>
+
+              <div className="pc-stat">
+                <span>Daily target</span>
+                <b>{p.target ? Number(p.target).toLocaleString() : "—"}</b>
+              </div>
+
+              <div className="pc-stat">
+                <span>Completed</span>
+                <b>{s.completed.toLocaleString()}</b>
+              </div>
+
+              <div className="pc-stat">
+                <span>Completion</span>
+                <b>{s.total ? `${s.progress}%` : "—"}</b>
+              </div>
+
+              <Progress value={s.progress} />
+
+              <div className="pc-foot">
+                <span>
+                  {s.total
+                    ? `${s.remaining.toLocaleString()} remaining`
+                    : "Set target"}
+                </span>
+
+                <span>Due {p.deadline || "—"}</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </Page>
   );
@@ -3351,111 +2057,102 @@ function Projects({
 /* =========================================================
    QA
 ========================================================= */
+function QA({ data }) {
+  const latestDate = getLatestImportedDate(data);
+  const [period, setPeriod] = useState(() => ({
+    mode: "single",
+    start: latestDate,
+    end: latestDate
+  }));
+  const range = getDateRange(period);
 
-function QA({
-  data
-}) {
-  const reviewed =
-    data.team.reduce(
-      (s, x) =>
-        s +
-        (Number(
-          x.reviewed
-        ) || 0),
-      0
-    );
+  const allAccuracyRows = Array.isArray(data.accuracyRecords) ? data.accuracyRecords : [];
+  const accuracyRows = allAccuracyRows.filter(x => isDateInRange(x.date, range));
 
-  const errors =
-    data.team.reduce(
-      (s, x) =>
-        s +
-        (Number(
-          x.errors
-        ) || 0),
-      0
-    );
+  const totalDaily = accuracyRows.reduce((s, x) => s + (Number(x.dailyCount) || 0), 0);
+  const totalTP = accuracyRows.reduce((s, x) => s + (Number(x.tp) || 0), 0);
+  const totalFP = accuracyRows.reduce((s, x) => s + (Number(x.fp) || 0), 0);
+  const totalFN = accuracyRows.reduce((s, x) => s + (Number(x.fn) || 0), 0);
+  const totalErrors = totalFP + totalFN;
+  const denominator = totalTP + totalFP + totalFN;
+
+  const calculatedAccuracy = denominator > 0
+    ? (totalTP / denominator) * 100
+    : accuracyRows.length
+      ? accuracyRows.reduce((s, x) => s + (Number(x.accuracy) || 0), 0) / accuracyRows.length
+      : 0;
+
+  const averageScore = accuracyRows.length
+    ? accuracyRows.reduce((s, x) => s + (Number(x.score) || 0), 0) / accuracyRows.length
+    : 0;
 
   return (
     <Page
       title="QA & Reviews"
-      subtitle="Keep annotation quality visible and actionable."
+      subtitle={
+        range.start && range.end
+          ? `${range.label}: ${accuracyRows.length} Accuracy Report records${data.accuracyFile ? ` • ${data.accuracyFile}` : ""}.`
+          : "Select a specific date or date range to view the Accuracy Report."
+      }
     >
+      <DateFilter value={period} onChange={setPeriod} data={data} />
+
       <div className="cards">
-        <Metric
-          icon={
-            ClipboardCheck
-          }
-          label="Total reviewed"
-          value={reviewed.toLocaleString()}
-          note="Team review volume"
-          trend="+6.2%"
-        />
-
-        <Metric
-          icon={
-            CheckCircle2
-          }
-          label="Quality health"
-          value="96.8%"
-          note="Based on current issues"
-          trend="Good"
-        />
-
-        <Metric
-          icon={
-            AlertTriangle
-          }
-          label="Total errors"
-          value={errors}
-          note="Across active members"
-          trend="Monitor"
-        />
+        <Metric icon={ClipboardCheck} label="Total reviewed" value={totalDaily.toLocaleString()} note="Daily Count in selected period" trend={accuracyRows.length ? "Live" : "Pending"} />
+        <Metric icon={CheckCircle2} label="Accuracy" value={`${calculatedAccuracy.toFixed(1)}%`} note={accuracyRows.length ? "From Accuracy Report" : "No report in selected period"} trend={accuracyRows.length ? "Good" : "Pending"} />
+        <Metric icon={Target} label="Daily count" value={totalDaily.toLocaleString()} note="Images reported" trend={accuracyRows.length ? "Imported" : "Pending"} />
+        <Metric icon={AlertTriangle} label="Total errors" value={totalErrors.toLocaleString()} note="FP + FN in selected period" trend={totalErrors ? "Monitor" : "Clear"} />
       </div>
 
-      <Panel title="Review readiness">
+      <Panel title={`Review readiness — ${range.label}`}>
         <div className="qa-grid">
-          <div>
-            <h2>
-              96.8%
-            </h2>
-
-            <p className="muted">
-              Overall quality health
-            </p>
-
-            <Progress
-              value={
-                96.8
-              }
-            />
-          </div>
-
-          <div>
-            <h2>
-              {reviewed.toLocaleString()}
-            </h2>
-
-            <p className="muted">
-              Reviews completed
-            </p>
-          </div>
-
-          <div>
-            <h2>
-              {
-                data.issues.filter(
-                  x =>
-                    x.status ===
-                    "Open"
-                ).length
-              }
-            </h2>
-
-            <p className="muted">
-              Open QA issues
-            </p>
-          </div>
+          <div><h2>{calculatedAccuracy.toFixed(1)}%</h2><p className="muted">Overall accuracy</p><Progress value={calculatedAccuracy} /></div>
+          <div><h2>{totalTP.toLocaleString()}</h2><p className="muted">True positives (TP)</p></div>
+          <div><h2>{totalFP.toLocaleString()}</h2><p className="muted">False positives (FP)</p></div>
+          <div><h2>{totalFN.toLocaleString()}</h2><p className="muted">False negatives (FN)</p></div>
+          <div><h2>{averageScore.toFixed(1)}</h2><p className="muted">Average score</p></div>
+          <div><h2>{data.issues.filter(x => x.status === "Open").length}</h2><p className="muted">Open QA issues</p></div>
         </div>
+      </Panel>
+
+      <Panel title={`Accuracy Report — ${accuracyRows.length} records`}>
+        {!accuracyRows.length ? (
+          <p className="muted">No Accuracy Report data exists for <b>{range.label}</b>.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th><th>Name</th><th>Daily Count</th><th>TP</th><th>FP</th><th>FN</th>
+                  <th>Accuracy</th><th>Score</th><th>Detailed Report</th><th>Images Used</th><th>Comment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accuracyRows.map((x, i) => (
+                  <tr key={x.id || i}>
+                    <td>{x.date || "—"}</td>
+                    <td><b>{x.name}</b></td>
+                    <td>{Number(x.dailyCount || 0).toLocaleString()}</td>
+                    <td>{Number(x.tp || 0).toLocaleString()}</td>
+                    <td>{Number(x.fp || 0).toLocaleString()}</td>
+                    <td>{Number(x.fn || 0).toLocaleString()}</td>
+                    <td><b>{Number(x.accuracy || 0).toFixed(1)}%</b></td>
+                    <td><b>{Number(x.score || 0).toFixed(1)}</b></td>
+                    <td>
+                      {x.link ? (
+                        <a className="link-btn" href={x.link} target="_blank" rel="noreferrer">
+                          Open <ExternalLink size={14} />
+                        </a>
+                      ) : "—"}
+                    </td>
+                    <td>{x.imagesUsed || "—"}</td>
+                    <td>{x.comment || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
     </Page>
   );
@@ -3464,143 +2161,54 @@ function QA({
 /* =========================================================
    ISSUES
 ========================================================= */
-
-function Issues({
-  rows,
-  remove,
-  openAdd
-}) {
+function Issues({ rows, remove, openAdd, canManage }) {
   return (
     <Page
       title="Issues tracker"
       subtitle="Capture annotation problems and close them before submission."
-      action={
-        openAdd
-          ? "+ Log issue"
-          : null
-      }
-      onAction={
-        openAdd
-      }
+      action={canManage ? "+ Log issue" : undefined}
+      onAction={openAdd}
     >
       <Panel
-        title={`${rows.filter(
-          x =>
-            x.status ===
-            "Open"
-        ).length} open issues`}
+        title={`${rows.filter(x => x.status === "Open").length} open issues`}
       >
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>
-                  Issue
-                </th>
-
-                <th>
-                  Project
-                </th>
-
-                <th>
-                  Owner
-                </th>
-
-                <th>
-                  Severity
-                </th>
-
-                <th>
-                  Status
-                </th>
-
-                <th>
-                  Date
-                </th>
-
-                {remove && (
-                  <th />
-                )}
+                <th>Issue</th>
+                <th>Project</th>
+                <th>Owner</th>
+                <th>Severity</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th></th>
               </tr>
             </thead>
 
             <tbody>
-              {rows.map(
-                x => (
-                  <tr
-                    key={
-                      x.id
-                    }
-                  >
-                    <td>
-                      <b>
-                        {
-                          x.type
-                        }
-                      </b>
-                    </td>
-
-                    <td>
-                      {
-                        x.project
-                      }
-                    </td>
-
-                    <td>
-                      {
-                        x.owner
-                      }
-                    </td>
-
-                    <td>
-                      <span
-                        className={
-                          "severity " +
-                          x.severity.toLowerCase()
-                        }
-                      >
-                        {
-                          x.severity
-                        }
-                      </span>
-                    </td>
-
-                    <td>
-                      <Status
-                        text={
-                          x.status
-                        }
-                      />
-                    </td>
-
-                    <td>
-                      {
-                        x.date
-                      }
-                    </td>
-
-                    {remove && (
-                      <td>
-                        <button
-                          className="delete"
-                          onClick={() =>
-                            remove(
-                              "issues",
-                              x.id
-                            )
-                          }
-                        >
-                          <Trash2
-                            size={
-                              16
-                            }
-                          />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                )
-              )}
+              {rows.map(x => (
+                <tr key={x.id}>
+                  <td><b>{x.type}</b></td>
+                  <td>{x.project}</td>
+                  <td>{x.owner}</td>
+                  <td>
+                    <span className={"severity " + x.severity.toLowerCase()}>
+                      {x.severity}
+                    </span>
+                  </td>
+                  <td><Status text={x.status} /></td>
+                  <td>{x.date}</td>
+                  <td>
+                    <button
+                      className="delete"
+                      onClick={() => remove("issues", x.id)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -3612,124 +2220,130 @@ function Issues({
 /* =========================================================
    ANALYTICS
 ========================================================= */
+function Analytics({ data }) {
+  const latestDate = getLatestImportedDate(data);
+  const [period, setPeriod] = useState(() => ({
+    mode: "single",
+    start: latestDate,
+    end: latestDate
+  }));
+  const range = getDateRange(period);
 
-function Analytics({
-  data
-}) {
-  const max =
-    Math.max(
-      ...data.team.map(
-        x =>
-          Number(
-            x.completed
-          ) || 0
-      ),
-      1
-    );
+  const sheetRows = Array.isArray(data.sheetRecords)
+    ? data.sheetRecords.filter(x => isDateInRange(x.date, range))
+    : [];
+
+  const accuracyRows = Array.isArray(data.accuracyRecords)
+    ? data.accuracyRecords.filter(x => isDateInRange(x.date, range))
+    : [];
+
+  const memberMap = {};
+  sheetRows.forEach(x => {
+    const name = String(x.name || "").trim();
+    if (!name) return;
+
+    if (!memberMap[name]) {
+      memberMap[name] = { name, completed: 0, reviewed: 0 };
+    }
+
+    const worked = Number(x.worked) || 0;
+    memberMap[name].completed += worked;
+
+    if (/review/i.test(String(x.type || ""))) {
+      memberMap[name].reviewed += worked;
+    }
+  });
+
+  const productivityRows = Object.values(memberMap).sort((a, b) => b.completed - a.completed);
+  const max = Math.max(...productivityRows.map(x => x.completed), 1);
+  const maxDaily = Math.max(...accuracyRows.map(x => Number(x.dailyCount) || 0), 1);
+
+  const averageAccuracy = accuracyRows.length
+    ? accuracyRows.reduce((s, x) => s + (Number(x.accuracy) || 0), 0) / accuracyRows.length
+    : 0;
+
+  const averageScore = accuracyRows.length
+    ? accuracyRows.reduce((s, x) => s + (Number(x.score) || 0), 0) / accuracyRows.length
+    : 0;
+
+  const totalWorked = productivityRows.reduce((s, x) => s + x.completed, 0);
+  const totalTarget = data.team.reduce((s, x) => s + (Number(x.target) || 0), 0);
 
   return (
     <Page
       title="Analytics"
-      subtitle="Understand productivity trends and team capacity."
+      subtitle={`Productivity and accuracy analytics for ${range.label.toLowerCase()}.`}
     >
-      <Panel title="Completed images by team member">
-        <div className="bars">
-          {data.team.map(
-            x => (
-              <div
-                className="bar-row"
-                key={
-                  x.id
-                }
-              >
-                <span>
-                  {
-                    x.name
-                  }
-                </span>
+      <DateFilter value={period} onChange={setPeriod} data={data} />
 
-                <div>
-                  <i
-                    style={{
-                      width: `${
-                        ((Number(
-                          x.completed
-                        ) || 0) /
-                          max) *
-                        100
-                      }%`
-                    }}
-                  />
-                </div>
-
-                <b>
-                  {
-                    x.completed
-                  }
-                </b>
+      <Panel title={`Completed images by team member — ${range.label}`}>
+        {!productivityRows.length ? (
+          <p className="muted">No Daily Effort records exist for <b>{range.label}</b>.</p>
+        ) : (
+          <div className="bars">
+            {productivityRows.map(x => (
+              <div className="bar-row" key={x.name}>
+                <span>{x.name}</span>
+                <div><i style={{ width: `${(x.completed / max) * 100}%` }} /></div>
+                <b>{x.completed.toLocaleString()}</b>
               </div>
-            )
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </Panel>
 
-      <div className="grid two">
+      <div className="grid three">
         <Panel title="Capacity">
-          <div className="big-number">
-            {Math.round(
-              (data.team.reduce(
-                (
-                  s,
-                  x
-                ) =>
-                  s +
-                  (Number(
-                    x.completed
-                  ) ||
-                    0),
-                0
-              ) /
-                Math.max(
-                  1,
-                  data.team.reduce(
-                    (
-                      s,
-                      x
-                    ) =>
-                      s +
-                      (Number(
-                        x.target
-                      ) ||
-                        0),
-                      0
-                  )
-                )) *
-                100
-            )}
-            %
-          </div>
-
-          <p className="muted">
-            Team target utilization today
-          </p>
+          <div className="big-number">{totalTarget ? Math.round((totalWorked / totalTarget) * 100) : 0}%</div>
+          <p className="muted">Selected-period work vs current team targets</p>
         </Panel>
 
-        <Panel title="Operational health">
-          <div className="health">
-            <CheckCircle2 />
+        <Panel title="Accuracy health">
+          <div className="big-number">{accuracyRows.length ? `${averageAccuracy.toFixed(1)}%` : "—"}</div>
+          <p className="muted">Average accuracy from Accuracy Report</p>
+          <Progress value={averageAccuracy} />
+        </Panel>
 
-            <b>
-              Healthy
-            </b>
-
-            <span>
-              Most active work
-              is progressing
-              within target.
-            </span>
-          </div>
+        <Panel title="Average score">
+          <div className="big-number">{accuracyRows.length ? averageScore.toFixed(1) : "—"}</div>
+          <p className="muted">Score from Accuracy Report</p>
         </Panel>
       </div>
+
+      <Panel title={`Accuracy by team member — ${range.label}`}>
+        {!accuracyRows.length ? (
+          <p className="muted">No Accuracy Report data exists for <b>{range.label}</b>.</p>
+        ) : (
+          <div className="bars">
+            {accuracyRows.map((x, i) => {
+              const accuracy = Math.max(0, Math.min(100, Number(x.accuracy) || 0));
+              return (
+                <div className="bar-row" key={x.id || i}>
+                  <span>{x.name}</span>
+                  <div><i style={{ width: `${accuracy}%` }} /></div>
+                  <b>{accuracy.toFixed(1)}%</b>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
+
+      <Panel title={`Daily count from Accuracy Report — ${range.label}`}>
+        {!accuracyRows.length ? (
+          <p className="muted">No Accuracy Report data available.</p>
+        ) : (
+          <div className="bars">
+            {accuracyRows.map((x, i) => (
+              <div className="bar-row" key={x.id || i}>
+                <span>{x.name}</span>
+                <div><i style={{ width: `${((Number(x.dailyCount) || 0) / maxDaily) * 100}%` }} /></div>
+                <b>{Number(x.dailyCount || 0).toLocaleString()}</b>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
     </Page>
   );
 }
@@ -3737,653 +2351,402 @@ function Analytics({
 /* =========================================================
    SHEET IMPORT
 ========================================================= */
+function SheetImport({ data, update, notify }) {
+  const [preview, setPreview] = useState([]);
+  const [accuracyPreview, setAccuracyPreview] = useState([]);
+  const [fileName, setFileName] = useState(data.sheetFile || "");
+  const [accuracyFileName, setAccuracyFileName] = useState(data.accuracyFile || "");
+  const [busy, setBusy] = useState(false);
+  const [accuracyBusy, setAccuracyBusy] = useState(false);
 
-function SheetImport({
-  data,
-  update,
-  notify
-}) {
-  const [
-    preview,
-    setPreview
-  ] = useState([]);
-
-  const [
-    fileName,
-    setFileName
-  ] = useState("");
-
-  const [
-    busy,
-    setBusy
-  ] = useState(false);
-
-  function parseWorkbook(
-    file
-  ) {
-    setBusy(true);
-    setFileName(
-      file.name
-    );
-
-    const reader =
-      new FileReader();
-
-    reader.onload =
-      async e => {
-        try {
-          const wb =
-            XLSX.read(
-              e.target.result,
-              {
-                type: "array",
-                cellDates:
-                  true
-              }
-            );
-
-          const ws =
-            wb.Sheets[
-              wb
-                .SheetNames[0]
-            ];
-
-          const rows =
-            XLSX.utils.sheet_to_json(
-              ws,
-              {
-                header: 1,
-                defval:
-                  null,
-                raw: true
-              }
-            );
-
-          const dateStarts =
-            [];
-
-          for (
-            let c = 1;
-            c <
-            (rows[0]
-              ?.length ||
-              0);
-            c++
-          ) {
-            const v =
-              rows[0][
-                c
-              ];
-
-            if (
-              v instanceof
-              Date
-            ) {
-              const pad =
-                n =>
-                  String(
-                    n
-                  ).padStart(
-                    2,
-                    "0"
-                  );
-
-              dateStarts.push(
-                {
-                  c,
-                  date: `${v.getFullYear()}-${pad(
-                    v.getMonth() +
-                      1
-                  )}-${pad(
-                    v.getDate()
-                  )}`
-                }
-              );
-            }
-          }
-
-          const records =
-            [];
-
-          const names =
-            [];
-
-          for (
-            let r = 2;
-            r <
-            rows.length;
-            r++
-          ) {
-            const name =
-              rows[r]?.[0];
-
-            if (!name)
-              continue;
-
-            const cleanName =
-              String(
-                name
-              ).trim();
-
-            if (
-              !names.includes(
-                cleanName
-              )
-            ) {
-              names.push(
-                cleanName
-              );
-            }
-
-            for (
-              const d of dateStarts
-            ) {
-              const project =
-                rows[r]?.[
-                  d.c
-                ];
-
-              const type =
-                rows[r]?.[
-                  d.c + 1
-                ];
-
-              const worked =
-                rows[r]?.[
-                  d.c + 2
-                ];
-
-              const link =
-                rows[r]?.[
-                  d.c + 3
-                ];
-
-              if (
-                project ==
-                  null &&
-                type ==
-                  null &&
-                worked ==
-                  null &&
-                link ==
-                  null
-              ) {
-                continue;
-              }
-
-              const ps =
-                String(
-                  project ??
-                    ""
-                ).split(
-                  "\n"
-                );
-
-              const ts =
-                String(
-                  type ??
-                    ""
-                ).split(
-                  "\n"
-                );
-
-              const nums =
-                String(
-                  worked ??
-                    ""
-                ).split(
-                  "\n"
-                );
-
-              const ls =
-                String(
-                  link ??
-                    ""
-                ).split(
-                  "\n"
-                );
-
-              ps.forEach(
-                (
-                  p,
-                  i
-                ) => {
-                  const text =
-                    p.trim();
-
-                  if (!text)
-                    return;
-
-                  const raw =
-                    nums[
-                      i
-                    ] ??
-                    nums[
-                      nums.length -
-                        1
-                    ] ??
-                    "";
-
-                  const n =
-                    Number(
-                      String(
-                        raw
-                      )
-                        .replace(
-                          /,/g,
-                          ""
-                        )
-                        .replace(
-                          /--|---/g,
-                          ""
-                        )
-                    ) || 0;
-
-                  records.push(
-                    {
-                      id: `${d.date}-${cleanName}-${records.length}`,
-                      date:
-                        d.date,
-                      name:
-                        cleanName,
-                      project:
-                        text,
-                      type:
-                        (
-                          ts[
-                            i
-                          ] ??
-                          ts[
-                            ts.length -
-                              1
-                          ] ??
-                          ""
-                        ).trim(),
-                      worked:
-                        n,
-                      link:
-                        (
-                          ls[
-                            i
-                          ] ??
-                          ls[
-                            ls.length -
-                              1
-                          ] ??
-                          ""
-                        ).trim()
-                    }
-                  );
-                }
-              );
-            }
-          }
-
-          const workDates =
-            [
-              ...new Set(
-                records
-                  .map(
-                    x =>
-                      x.date
-                  )
-                  .filter(
-                    Boolean
-                  )
-              )
-            ].sort();
-
-          const today =
-            workDates[
-              workDates.length -
-                1
-            ] ||
-            new Date()
-              .toISOString()
-              .slice(
-                0,
-                10
-              );
-
-          const todayRows =
-            records.filter(
-              x =>
-                x.date ===
-                  today &&
-                ![
-                  "Saturday",
-                  "Sunday",
-                  "On Leave"
-                ].includes(
-                  x.project
-                )
-            );
-
-          const team =
-            names.map(
-              (
-                name,
-                i
-              ) => {
-                const person =
-                  todayRows.filter(
-                    x =>
-                      x.name ===
-                      name
-                  );
-
-                const projectNames =
-                  [
-                    ...new Set(
-                      person
-                        .map(
-                          x =>
-                            getConfiguredProjectName(
-                              x.project
-                            )
-                        )
-                        .filter(
-                          Boolean
-                        )
-                    )
-                  ];
-
-                const target =
-                  projectNames.reduce(
-                    (
-                      sum,
-                      project
-                    ) =>
-                      sum +
-                      (projectTargets[
-                        project
-                      ] ||
-                        0),
-                    0
-                  );
-
-                const completed =
-                  person.reduce(
-                    (
-                      s,
-                      x
-                    ) =>
-                      s +
-                      (Number(
-                        x.worked
-                      ) ||
-                        0),
-                    0
-                  );
-
-                const reviewed =
-                  person
-                    .filter(
-                      x =>
-                        /review/i.test(
-                          x.type
-                        )
-                    )
-                    .reduce(
-                      (
-                        s,
-                        x
-                      ) =>
-                        s +
-                        (Number(
-                          x.worked
-                        ) ||
-                          0),
-                      0
-                    );
-
-                const leave =
-                  records.some(
-                    x =>
-                      x.date ===
-                        today &&
-                      x.name ===
-                        name &&
-                      x.project ===
-                        "On Leave"
-                  );
-
-                return {
-                  id:
-                    1000 +
-                    i,
-                  name,
-                  role:
-                    "Annotator",
-                  target,
-                  completed,
-                  reviewed,
-                  errors: 0,
-                  status:
-                    leave
-                      ? "Away"
-                      : "Active"
-                };
-              }
-            );
-
-          const projectMap =
-            {};
-
-          Object.entries(
-            projectTargets
-          ).forEach(
-            ([
-              name,
-              target
-            ]) => {
-              projectMap[
-                name
-              ] = {
-                completed: 0,
-                target
-              };
-            }
-          );
-
-          todayRows.forEach(
-            x => {
-              const configuredName =
-                getConfiguredProjectName(
-                  x.project
-                );
-
-              if (
-                !configuredName
-              )
-                return;
-
-              if (
-                !projectMap[
-                  configuredName
-                ]
-              ) {
-                projectMap[
-                  configuredName
-                ] = {
-                  completed: 0,
-                  target:
-                    projectTargets[
-                      configuredName
-                    ] ||
-                    0
-                };
-              }
-
-              projectMap[
-                configuredName
-              ].completed +=
-                Number(
-                  x.worked
-                ) || 0;
-            }
-          );
-
-          const projects =
-            Object.entries(
-              projectMap
-            ).map(
-              (
-                [
-                  name,
-                  v
-                ],
-                i
-              ) => {
-                const target =
-                  Number(
-                    v.target
-                  ) || 0;
-
-                const completed =
-                  Math.max(
-                    0,
-                    Number(
-                      v.completed
-                    ) || 0
-                  );
-
-                const remaining =
-                  Math.max(
-                    0,
-                    target -
-                      completed
-                  );
-
-                return {
-                  id:
-                    2000 +
-                    i,
-                  name,
-                  target,
-                  total:
-                    target,
-                  completed,
-                  remaining,
-                  status:
-                    getProjectStatus(
-                      target,
-                      completed,
-                      remaining
-                    ),
-                  deadline:
-                    ""
-                };
-              }
-            );
-
-          await update({
-            ...data,
-            team,
-            projects,
-            sheetRecords:
-              records,
-            sheetFile:
-              file.name,
-            sheetLastSync:
-              new Date().toISOString()
-          });
-
-          setPreview(
-            records.slice(
-              0,
-              25
-            )
-          );
-
-          notify(
-            `Imported ${records.length} work records`
-          );
-        } catch (err) {
-          console.error(
-            err
-          );
-
-          alert(
-            "Could not read this Excel file. Please use .xlsx format."
-          );
-        } finally {
-          setBusy(
-            false
-          );
-        }
-      };
-
-    reader.readAsArrayBuffer(
-      file
-    );
+  function normalizeHeader(value) {
+    return String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[%()]/g, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ");
   }
+
+  function findHeaderIndex(headers, candidates) {
+    const normalized = headers.map(normalizeHeader);
+    const wanted = candidates.map(normalizeHeader);
+    const exact = normalized.findIndex(h => wanted.includes(h));
+    if (exact >= 0) return exact;
+    return normalized.findIndex(h => wanted.some(c => h.includes(c) || c.includes(h)));
+  }
+
+  function parseNumber(value) {
+    if (value == null || value === "") return 0;
+    const cleaned = String(value)
+      .replace(/,/g, "")
+      .replace(/%/g, "")
+      .trim();
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function parseAccuracyValue(value) {
+    if (value == null || value === "") return 0;
+    const text = String(value).trim();
+    const n = parseNumber(text);
+    if (text.includes("%")) return n;
+    if (n > 0 && n <= 1) return n * 100;
+    return n;
+  }
+
+  function parseWorkbook(file) {
+    setBusy(true);
+    setFileName(file.name);
+
+    const reader = new FileReader();
+
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, {
+          type: "array",
+          cellDates: true
+        });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, {
+          header: 1,
+          defval: null,
+          raw: true
+        });
+
+        const dateStarts = [];
+
+        for (let c = 1; c < (rows[0]?.length || 0); c++) {
+          const v = rows[0][c];
+          if (v instanceof Date) {
+            const pad = n => String(n).padStart(2, "0");
+            dateStarts.push({
+              c,
+              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
+            });
+          }
+        }
+
+        const records = [];
+        const names = [];
+
+        for (let r = 2; r < rows.length; r++) {
+          const name = rows[r]?.[0];
+          if (!name) continue;
+
+          const cleanName = String(name).trim();
+          if (!names.includes(cleanName)) names.push(cleanName);
+
+          for (const d of dateStarts) {
+            const project = rows[r]?.[d.c];
+            const type = rows[r]?.[d.c + 1];
+            const worked = rows[r]?.[d.c + 2];
+            const link = rows[r]?.[d.c + 3];
+
+            if (project == null && type == null && worked == null && link == null) continue;
+
+            const ps = String(project ?? "").split("\n");
+            const ts = String(type ?? "").split("\n");
+            const nums = String(worked ?? "").split("\n");
+            const ls = String(link ?? "").split("\n");
+
+            ps.forEach((p, i) => {
+              const text = p.trim();
+              if (!text) return;
+              const raw = nums[i] ?? nums[nums.length - 1] ?? "";
+              const n = parseNumber(raw);
+
+              records.push({
+                id: `${d.date}-${cleanName}-${records.length}`,
+                date: d.date,
+                name: cleanName,
+                project: text,
+                type: (ts[i] ?? ts[ts.length - 1] ?? "").trim(),
+                worked: n,
+                link: (ls[i] ?? ls[ls.length - 1] ?? "").trim()
+              });
+            });
+          }
+        }
+
+        const workDates = [...new Set(records.map(x => x.date).filter(Boolean))].sort();
+        const today = workDates[workDates.length - 1] || new Date().toISOString().slice(0, 10);
+        const todayRows = records.filter(
+          x => x.date === today && !["Saturday", "Sunday", "On Leave"].includes(x.project)
+        );
+
+        const team = names.map((name, i) => {
+          const person = todayRows.filter(x => x.name === name);
+          const projectNames = [...new Set(person.map(x => getConfiguredProjectName(x.project)).filter(Boolean))];
+          const target = projectNames.reduce((sum, project) => sum + (projectTargets[project] || 0), 0);
+          const completed = person.reduce((s, x) => s + (Number(x.worked) || 0), 0);
+          const reviewed = person.filter(x => /review/i.test(x.type)).reduce((s, x) => s + (Number(x.worked) || 0), 0);
+          const leave = records.some(x => x.date === today && x.name === name && x.project === "On Leave");
+
+          return {
+            id: 1000 + i,
+            name,
+            role: "Annotator",
+            target,
+            completed,
+            reviewed,
+            errors: 0,
+            status: leave ? "Away" : "Active"
+          };
+        });
+
+        const projectMap = {};
+        Object.entries(projectTargets).forEach(([name, target]) => {
+          const existing = data.projects?.find(p => String(p.name).toLowerCase() === String(name).toLowerCase());
+          projectMap[name] = {
+            completed: 0,
+            target,
+            totalImages: Math.max(0, Number(existing?.totalImages ?? existing?.total ?? existing?.target) || target),
+            deadline: existing?.deadline || ""
+          };
+        });
+
+        todayRows.forEach(x => {
+          const configuredName = getConfiguredProjectName(x.project);
+          if (!configuredName) return;
+          if (!projectMap[configuredName]) {
+            projectMap[configuredName] = {
+              completed: 0,
+              target: projectTargets[configuredName] || 0,
+              totalImages: Math.max(0, Number(projectTargets[configuredName]) || 0),
+              deadline: ""
+            };
+          }
+          projectMap[configuredName].completed += Number(x.worked) || 0;
+        });
+
+        const projects = Object.entries(projectMap).map(([name, v], i) => {
+          const target = Number(v.target) || 0;
+          const totalImages = Math.max(0, Number(v.totalImages ?? target) || 0);
+          const completed = Math.max(0, Math.min(totalImages, Number(v.completed) || 0));
+          const remaining = Math.max(0, totalImages - completed);
+          return {
+            id: 2000 + i,
+            name,
+            target,
+            totalImages,
+            total: totalImages,
+            completed,
+            remaining,
+            status: getProjectStatus(totalImages, completed, remaining),
+            deadline: v.deadline || ""
+          };
+        });
+
+        update({
+          ...data,
+          team,
+          projects,
+          sheetRecords: records,
+          sheetFile: file.name,
+          sheetLastSync: new Date().toISOString()
+        });
+
+        setPreview(records.slice(0, 25));
+        notify(`Imported ${records.length} work records`);
+      } catch (err) {
+        console.error(err);
+        alert("Could not read this Excel file. Please use .xlsx format.");
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  }
+
+  function parseAccuracyWorkbook(file) {
+    setAccuracyBusy(true);
+    setAccuracyFileName(file.name);
+
+    const reader = new FileReader();
+
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, {
+          type: "array",
+          cellDates: true
+        });
+
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, {
+          header: 1,
+          defval: null,
+          raw: true
+        });
+
+        if (!rows.length) {
+          alert("The Accuracy Report is empty.");
+          return;
+        }
+
+        // Find the header row even if the sheet has a title above it.
+        let headerRowIndex = -1;
+        let headers = [];
+
+        for (let r = 0; r < Math.min(rows.length, 10); r++) {
+          const candidate = rows[r] || [];
+          const normalized = candidate.map(normalizeHeader);
+          const hasName = normalized.some(h => ["name", "member", "team member", "employee name"].includes(h));
+          const hasAccuracy = normalized.some(h => h.includes("accuracy"));
+          const hasTP = normalized.some(h => h === "tp" || h.includes("true positive"));
+          if (hasName && (hasAccuracy || hasTP)) {
+            headerRowIndex = r;
+            headers = candidate;
+            break;
+          }
+        }
+
+        if (headerRowIndex === -1) {
+          headerRowIndex = 0;
+          headers = rows[0] || [];
+        }
+
+        const dateIndex = findHeaderIndex(headers, [
+          "date", "report date", "accuracy date", "day"
+        ]);
+        const nameIndex = findHeaderIndex(headers, [
+          "name", "member", "team member", "employee name", "employee"
+        ]);
+        const dailyCountIndex = findHeaderIndex(headers, [
+          "daily count", "dailycount", "count", "daily output", "images count", "daily images"
+        ]);
+        const tpIndex = findHeaderIndex(headers, [
+          "tp", "true positive", "true positives"
+        ]);
+        const fpIndex = findHeaderIndex(headers, [
+          "fp", "false positive", "false positives"
+        ]);
+        const fnIndex = findHeaderIndex(headers, [
+          "fn", "false negative", "false negatives"
+        ]);
+        const accuracyIndex = findHeaderIndex(headers, [
+          "accuracy", "accuracy ", "accuracy percent", "accuracy percentage"
+        ]);
+        const scoreIndex = findHeaderIndex(headers, [
+          "score", "qa score", "quality score"
+        ]);
+        const linkIndex = findHeaderIndex(headers, [
+          "link to the detailed report", "detailed report", "report link", "link", "detailed report link"
+        ]);
+        const imagesUsedIndex = findHeaderIndex(headers, [
+          "images used for calculating accuracy", "images used", "images used for accuracy", "accuracy images", "images"
+        ]);
+        const commentIndex = findHeaderIndex(headers, [
+          "comment", "comments", "remark", "remarks", "note", "notes"
+        ]);
+
+        if (nameIndex === -1) {
+          alert(`Could not find the Name column. Detected headers: ${headers.filter(Boolean).join(" | ")}`);
+          return;
+        }
+
+        if (dailyCountIndex === -1 && tpIndex === -1 && accuracyIndex === -1) {
+          alert(`Could not find Accuracy Report data columns. Detected headers: ${headers.filter(Boolean).join(" | ")}`);
+          return;
+        }
+
+        const records = [];
+
+        for (let r = headerRowIndex + 1; r < rows.length; r++) {
+          const row = rows[r] || [];
+          const name = String(row[nameIndex] ?? "").trim();
+          if (!name) continue;
+
+          const date = dateIndex >= 0 ? normalizeDateValue(row[dateIndex]) : "";
+          const dailyCount = dailyCountIndex >= 0 ? parseNumber(row[dailyCountIndex]) : 0;
+          const tp = tpIndex >= 0 ? parseNumber(row[tpIndex]) : 0;
+          const fp = fpIndex >= 0 ? parseNumber(row[fpIndex]) : 0;
+          const fn = fnIndex >= 0 ? parseNumber(row[fnIndex]) : 0;
+
+          let accuracy = accuracyIndex >= 0 ? parseAccuracyValue(row[accuracyIndex]) : 0;
+          if (!accuracy && tp + fp + fn > 0) {
+            accuracy = (tp / (tp + fp + fn)) * 100;
+          }
+
+          const score = scoreIndex >= 0 ? parseNumber(row[scoreIndex]) : 0;
+          const link = linkIndex >= 0 ? String(row[linkIndex] ?? "").trim() : "";
+          const imagesUsed = imagesUsedIndex >= 0 ? String(row[imagesUsedIndex] ?? "").trim() : "";
+          const comment = commentIndex >= 0 ? String(row[commentIndex] ?? "").trim() : "";
+
+          records.push({
+            id: `accuracy-${Date.now()}-${r}`,
+            date,
+            name,
+            dailyCount,
+            tp,
+            fp,
+            fn,
+            accuracy: Math.max(0, Math.min(100, accuracy)),
+            score,
+            link,
+            imagesUsed,
+            comment
+          });
+        }
+
+        if (!records.length) {
+          alert("No team member records were found in the Accuracy Report.");
+          return;
+        }
+
+        update({
+          ...data,
+          accuracyRecords: records,
+          accuracyFile: file.name,
+          accuracyLastSync: new Date().toISOString()
+        });
+
+        setAccuracyPreview(records.slice(0, 25));
+        notify(`Imported Accuracy Report for ${records.length} team members`);
+      } catch (err) {
+        console.error(err);
+        alert("Could not read this Accuracy Report. Please use .xlsx format and check the column names.");
+      } finally {
+        setAccuracyBusy(false);
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  }
+
+  const storedAccuracy = accuracyPreview.length
+    ? accuracyPreview
+    : data.accuracyRecords || [];
 
   return (
     <Page
       title="Sheet Import"
-      subtitle="Import your existing Daily Effort Sheet and use it as the dashboard data source."
+      subtitle="Import your Daily Effort Sheet and Accuracy Report. Both sources will update the dashboard automatically."
     >
       <div className="grid two">
-        <Panel title="Import Excel / Google Sheets export">
+        <Panel title="Daily Effort Sheet">
           <div className="import-box">
-            <Upload
-              size={28}
-            />
-
-            <h3>
-              {busy
-                ? "Importing..."
-                : "Upload your .xlsx file"}
-            </h3>
-
-            <p>
-              Use Google Sheets →
-              File → Download →
-              Microsoft Excel
-              (.xlsx).
-            </p>
-
+            <Upload size={28} />
+            <h3>{busy ? "Importing..." : "Upload your .xlsx file"}</h3>
+            <p>Use Google Sheets → File → Download → Microsoft Excel (.xlsx).</p>
             <label className="primary upload-label">
-              <Upload
-                size={17}
-              />
-
+              <Upload size={17} />
               Choose Excel file
-
               <input
                 type="file"
                 accept=".xlsx,.xls"
                 hidden
-                onChange={e =>
-                  e.target.files?.[0] &&
-                  parseWorkbook(
-                    e.target.files[0]
-                  )
-                }
+                onChange={e => e.target.files?.[0] && parseWorkbook(e.target.files[0])}
               />
             </label>
-
             {fileName && (
               <div className="import-success">
-                <CheckCircle2
-                  size={17}
-                />
-
+                <CheckCircle2 size={17} />
                 <span>
-                  <b>
-                    {
-                      fileName
-                    }
-                  </b>
-
+                  <b>{fileName}</b>
                   <small>
-                    Last imported:{" "}
-                    {data.sheetLastSync
-                      ? new Date(
-                          data.sheetLastSync
-                        ).toLocaleString()
-                      : "just now"}
+                    Last imported: {data.sheetLastSync ? new Date(data.sheetLastSync).toLocaleString() : "just now"}
                   </small>
                 </span>
               </div>
@@ -4391,158 +2754,119 @@ function SheetImport({
           </div>
         </Panel>
 
-        <Panel title="Detected sheet structure">
-          <div className="structure-list">
-            <div>
-              <b>
-                Name
-              </b>
-
-              <span>
-                Team member
-              </span>
-            </div>
-
-            <div>
-              <b>
-                Project
-              </b>
-
-              <span>
-                Project worked on
-              </span>
-            </div>
-
-            <div>
-              <b>
-                Annotation/Review
-              </b>
-
-              <span>
-                Work type
-              </span>
-            </div>
-
-            <div>
-              <b>
-                Total images worked
-              </b>
-
-              <span>
-                Daily output
-              </span>
-            </div>
-
-            <div>
-              <b>
-                Link to the range
-              </b>
-
-              <span>
-                Work/range link
-              </span>
-            </div>
+        <Panel title="Accuracy Report">
+          <div className="import-box">
+            <CheckCircle2 size={28} />
+            <h3>{accuracyBusy ? "Importing Accuracy Report..." : "Upload Accuracy Report"}</h3>
+            <p>
+              Required fields: Name, Daily Count, TP, FP, FN, Accuracy(%), Score, Detailed Report Link, Images Used and Comment.
+            </p>
+            <label className="primary upload-label">
+              <Upload size={17} />
+              Choose Accuracy Excel
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                hidden
+                onChange={e => e.target.files?.[0] && parseAccuracyWorkbook(e.target.files[0])}
+              />
+            </label>
+            {accuracyFileName && (
+              <div className="import-success">
+                <CheckCircle2 size={17} />
+                <span>
+                  <b>{accuracyFileName}</b>
+                  <small>
+                    Last imported: {data.accuracyLastSync ? new Date(data.accuracyLastSync).toLocaleString() : "just now"}
+                  </small>
+                </span>
+              </div>
+            )}
           </div>
         </Panel>
       </div>
 
-      <Panel
-        title={`Imported records ${
-          data.sheetRecords?.length
-            ? `(${data.sheetRecords.length})`
-            : ""
-        }`}
-      >
-        {preview.length ===
-          0 &&
-        !data.sheetRecords?.length ? (
-          <p className="muted">
-            Upload the Excel file
-            to preview and sync
-            your daily work.
-          </p>
+      <div className="grid two">
+        <Panel title="Daily Effort sheet structure">
+          <div className="structure-list">
+            <div><b>Name</b><span>Team member</span></div>
+            <div><b>Project</b><span>Project worked on</span></div>
+            <div><b>Annotation/Review</b><span>Work type</span></div>
+            <div><b>Total images worked</b><span>Daily output</span></div>
+            <div><b>Link to the range</b><span>Work/range link</span></div>
+          </div>
+        </Panel>
+
+        <Panel title="Accuracy Report structure">
+          <div className="structure-list">
+            <div><b>Name</b><span>Team member</span></div>
+            <div><b>Daily Count</b><span>Daily images completed</span></div>
+            <div><b>TP / FP / FN</b><span>Accuracy counts</span></div>
+            <div><b>Accuracy(%) / Score</b><span>Quality result</span></div>
+            <div><b>Detailed Report / Images / Comment</b><span>Supporting QA details</span></div>
+          </div>
+        </Panel>
+      </div>
+
+      <Panel title={`Imported daily records ${data.sheetRecords?.length ? `(${data.sheetRecords.length})` : ""}`}>
+        {preview.length === 0 && !data.sheetRecords?.length ? (
+          <p className="muted">Upload the Daily Effort Excel file to preview and sync daily work.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Date</th><th>Name</th><th>Project</th><th>Type</th><th>Images worked</th></tr>
+              </thead>
+              <tbody>
+                {(preview.length ? preview : data.sheetRecords.slice(0, 25)).map((x, i) => (
+                  <tr key={x.id || i}>
+                    <td>{x.date}</td>
+                    <td><b>{x.name}</b></td>
+                    <td>{x.project}</td>
+                    <td>{x.type}</td>
+                    <td><b>{Number(x.worked || 0).toLocaleString()}</b></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title={`Imported Accuracy records ${storedAccuracy.length ? `(${storedAccuracy.length})` : ""}`}>
+        {!storedAccuracy.length ? (
+          <p className="muted">Upload the Accuracy Report to preview the team accuracy data.</p>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>
-                    Date
-                  </th>
-
-                  <th>
-                    Name
-                  </th>
-
-                  <th>
-                    Project
-                  </th>
-
-                  <th>
-                    Type
-                  </th>
-
-                  <th>
-                    Images worked
-                  </th>
+                  <th>Date</th><th>Name</th><th>Daily Count</th><th>TP</th><th>FP</th><th>FN</th>
+                  <th>Accuracy</th><th>Score</th><th>Detailed Report</th><th>Images Used</th><th>Comment</th>
                 </tr>
               </thead>
-
               <tbody>
-                {(preview.length
-                  ? preview
-                  : data.sheetRecords.slice(
-                      0,
-                      25
-                    )
-                ).map(
-                  (
-                    x,
-                    i
-                  ) => (
-                    <tr
-                      key={
-                        x.id ||
-                        i
-                      }
-                    >
-                      <td>
-                        {
-                          x.date
-                        }
-                      </td>
-
-                      <td>
-                        <b>
-                          {
-                            x.name
-                          }
-                        </b>
-                      </td>
-
-                      <td>
-                        {
-                          x.project
-                        }
-                      </td>
-
-                      <td>
-                        {
-                          x.type
-                        }
-                      </td>
-
-                      <td>
-                        <b>
-                          {Number(
-                            x.worked ||
-                              0
-                          ).toLocaleString()}
-                        </b>
-                      </td>
-                    </tr>
-                  )
-                )}
+                {storedAccuracy.map((x, i) => (
+                  <tr key={x.id || i}>
+                    <td>{x.date || "—"}</td>
+                    <td><b>{x.name}</b></td>
+                    <td>{Number(x.dailyCount || 0).toLocaleString()}</td>
+                    <td>{Number(x.tp || 0).toLocaleString()}</td>
+                    <td>{Number(x.fp || 0).toLocaleString()}</td>
+                    <td>{Number(x.fn || 0).toLocaleString()}</td>
+                    <td><b>{Number(x.accuracy || 0).toFixed(1)}%</b></td>
+                    <td><b>{Number(x.score || 0).toFixed(1)}</b></td>
+                    <td>
+                      {x.link ? (
+                        <a className="link-btn" href={x.link} target="_blank" rel="noreferrer">
+                          Open <ExternalLink size={14} />
+                        </a>
+                      ) : "—"}
+                    </td>
+                    <td>{x.imagesUsed || "—"}</td>
+                    <td>{x.comment || "—"}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -4553,15 +2877,9 @@ function SheetImport({
 }
 
 /* =========================================================
-   SETTINGS
+   SETTINGS / PAGE / MODAL
 ========================================================= */
-
-function SettingsPage({
-  exportData,
-  importData,
-  role,
-  online
-}) {
+function SettingsPage({ exportData, importData, role, storageOnline, email, onSignOut }) {
   return (
     <Page
       title="Settings"
@@ -4570,92 +2888,61 @@ function SettingsPage({
       <Panel title="Data management">
         <div className="settings-row">
           <div>
-            <b>
-              Storage
-            </b>
-
-            <p>
-              Dashboard data is
-              stored online in
-              Supabase.
-            </p>
+            <b>Export backup</b>
+            <p>Download all team, project and issue data as JSON.</p>
           </div>
 
-          <span className="status active">
+          <button className="secondary" onClick={exportData}>
+            <Download size={17} />
+            Export
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <b>Import backup</b>
+            <p>Restore a previously exported dashboard backup.</p>
+          </div>
+
+          <label className="secondary">
+            <Upload size={17} />
+            Import
+            <input
+              type="file"
+              accept=".json"
+              onChange={importData}
+              hidden
+            />
+          </label>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <b>Storage</b>
+            <p>{storageOnline ? "Dashboard data is connected to Supabase online storage." : "Supabase is not configured, so the dashboard is using localStorage."}</p>
+          </div>
+
+          <span className={`status ${storageOnline ? "active" : "pending"}`}>
             <i />
-            {online
-              ? "Online"
-              : "Local"}
+            {storageOnline ? "Online" : "Local"}
           </span>
         </div>
 
         <div className="settings-row">
           <div>
-            <b>
-              Export backup
-            </b>
-
-            <p>
-              Download all team,
-              project and issue
-              data as JSON.
-            </p>
+            <b>Signed-in account</b>
+            <p>{email || "Local demo"} • {roleLabel(role)}</p>
           </div>
-
-          <button
-            className="secondary"
-            onClick={
-              exportData
-            }
-          >
-            <Download
-              size={17}
-            />
-
-            Export
-          </button>
+          {storageOnline && (
+            <button className="secondary" onClick={onSignOut}>
+              <LogOut size={17} /> Sign out
+            </button>
+          )}
         </div>
-
-        {canEdit(role) && (
-          <div className="settings-row">
-            <div>
-              <b>
-                Import backup
-              </b>
-
-              <p>
-                Restore a previously
-                exported dashboard
-                backup.
-              </p>
-            </div>
-
-            <label className="secondary">
-              <Upload
-                size={17}
-              />
-
-              Import
-
-              <input
-                type="file"
-                accept=".json"
-                onChange={
-                  importData
-                }
-                hidden
-              />
-            </label>
-          </div>
-        )}
       </Panel>
     </Page>
   );
 }
-
-/* =========================================================
-   PAGE
-========================================================= */
 
 function Page({
   title,
@@ -4668,34 +2955,15 @@ function Page({
     <div>
       <div className="page-head">
         <div>
-          <p className="eyebrow">
-            TEAM OPERATIONS
-          </p>
-
-          <h1>
-            {title}
-          </h1>
-
-          <p className="sub">
-            {subtitle}
-          </p>
+          <p className="eyebrow">TEAM OPERATIONS</p>
+          <h1>{title}</h1>
+          <p className="sub">{subtitle}</p>
         </div>
 
         {action && (
-          <button
-            className="primary"
-            onClick={
-              onAction
-            }
-          >
-            <Plus
-              size={18}
-            />
-
-            {action.replace(
-              "+ ",
-              ""
-            )}
+          <button className="primary" onClick={onAction}>
+            <Plus size={18} />
+            {action.replace("+ ", "")}
           </button>
         )}
       </div>
@@ -4705,83 +2973,151 @@ function Page({
   );
 }
 
-/* =========================================================
-   MODAL
-========================================================= */
-
-function Modal({
-  type,
-  onClose,
-  onSubmit
-}) {
-  const labels = {
-    team: [
-      "Add team member",
-      "Name",
-      "Role",
-      "Target",
-      "Completed"
-    ],
-
-    project: [
-      "Add project",
-      "Project name",
-      "Daily target",
-      "Completed today",
-      "Status"
-    ],
-
-    issue: [
-      "Log issue",
-      "Issue type",
-      "Project",
-      "Owner",
-      "Severity"
-    ]
-  };
-
-  const l =
-    labels[type];
+function ProjectEditModal({ project, onClose, onSubmit }) {
+  const stats = getProjectStats(project);
 
   return (
     <div className="modal-bg">
       <div className="modal">
         <div className="modal-head">
           <div>
-            <p className="eyebrow">
-              NEW RECORD
-            </p>
-
-            <h2>
-              {l[0]}
-            </h2>
+            <p className="eyebrow">EDIT PROJECT</p>
+            <h2>Edit project</h2>
           </div>
 
-          <button
-            className="icon-btn"
-            onClick={
-              onClose
-            }
-          >
+          <button className="icon-btn" type="button" onClick={onClose} aria-label="Close">
             <X />
           </button>
         </div>
 
-        <form
-          onSubmit={
-            onSubmit
-          }
-        >
+        <form onSubmit={onSubmit}>
+          <label>
+            Project name
+            <input
+              name="name"
+              defaultValue={project.name || ""}
+              required
+            />
+          </label>
+
+          <label>
+            Total number of images
+            <input
+              name="totalImages"
+              type="number"
+              min="0"
+              defaultValue={stats.total}
+              required
+            />
+          </label>
+
+          <label>
+            Daily target
+            <input
+              name="target"
+              type="number"
+              min="0"
+              defaultValue={project.target || 0}
+              required
+            />
+          </label>
+
+          <label>
+            Completed
+            <input
+              name="completed"
+              type="number"
+              min="0"
+              max={stats.total}
+              defaultValue={stats.completed}
+              required
+            />
+          </label>
+
+          <label>
+            Deadline
+            <input
+              name="deadline"
+              type="date"
+              defaultValue={project.deadline || ""}
+            />
+          </label>
+
+          <p className="muted project-edit-note">
+            Remaining images and status are calculated automatically from total images and completed values.
+          </p>
+
+          <div className="modal-actions">
+            <button type="button" className="secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="primary" type="submit">
+              <Save size={16} />
+              Save changes
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+
+function TeamMemberModal({ member, onClose, onSubmit }) {
+  const editing = Boolean(member);
+  return (
+    <div className="modal-bg">
+      <div className="modal">
+        <div className="modal-head">
+          <div><p className="eyebrow">TEAM MEMBER</p><h2>{editing ? "Edit team member" : "Add team member"}</h2></div>
+          <button className="icon-btn" onClick={onClose}><X /></button>
+        </div>
+        <form onSubmit={e => { e.preventDefault(); onSubmit(new FormData(e.currentTarget), member); }}>
+          <label>Name<input name="name" defaultValue={member?.name || ""} required /></label>
+          <label>Role<select name="role" defaultValue={member?.role || "Annotator"}><option>Member</option><option>Annotator</option><option>Reviewer</option><option>Team Lead</option></select></label>
+          <label>Target<input name="target" type="number" min="0" defaultValue={member?.target ?? 1000} /></label>
+          <label>Completed<input name="completed" type="number" min="0" defaultValue={member?.completed ?? 0} /></label>
+          <label>Reviewed<input name="reviewed" type="number" min="0" defaultValue={member?.reviewed ?? 0} /></label>
+          <label>Errors<input name="errors" type="number" min="0" defaultValue={member?.errors ?? 0} /></label>
+          <label>Status<select name="status" defaultValue={member?.status || "Active"}><option>Active</option><option>Away</option><option>Inactive</option></select></label>
+          <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" type="submit">{editing ? "Save changes" : "Add member"}</button></div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function Modal({ type, onClose, onSubmit }) {
+  const labels = {
+    team: ["Add team member", "Name", "Role", "Target", "Completed"],
+    project: ["Add project", "Project name", "Total number of images", "Daily target", "Completed", "Status"],
+    issue: ["Log issue", "Issue type", "Project", "Owner", "Severity"]
+  };
+
+  const l = labels[type];
+
+  return (
+    <div className="modal-bg">
+      <div className="modal">
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">NEW RECORD</p>
+            <h2>{l[0]}</h2>
+          </div>
+
+          <button className="icon-btn" onClick={onClose}>
+            <X />
+          </button>
+        </div>
+
+        <form onSubmit={onSubmit}>
           <label>
             {l[1]}
-
             <input
               name={
-                type ===
-                "team"
+                type === "team"
                   ? "name"
-                  : type ===
-                    "project"
+                  : type === "project"
                   ? "name"
                   : "type"
               }
@@ -4789,30 +3125,19 @@ function Modal({
             />
           </label>
 
-          {type ===
-            "team" && (
+          {type === "team" && (
             <>
               <label>
                 {l[2]}
-
                 <select name="role">
-                  <option>
-                    Annotator
-                  </option>
-
-                  <option>
-                    Reviewer
-                  </option>
-
-                  <option>
-                    Team Lead
-                  </option>
+                  <option>Annotator</option>
+                  <option>Reviewer</option>
+                  <option>Team Lead</option>
                 </select>
               </label>
 
               <label>
                 {l[3]}
-
                 <input
                   name="target"
                   type="number"
@@ -4822,7 +3147,6 @@ function Modal({
 
               <label>
                 {l[4]}
-
                 <input
                   name="completed"
                   type="number"
@@ -4832,12 +3156,21 @@ function Modal({
             </>
           )}
 
-          {type ===
-            "project" && (
+          {type === "project" && (
             <>
               <label>
-                {l[2]}
+                Total number of images
+                <input
+                  name="totalImages"
+                  type="number"
+                  min="0"
+                  required
+                  placeholder="e.g. 5000, 10000, 25000"
+                />
+              </label>
 
+              <label>
+                Daily target
                 <input
                   name="target"
                   type="number"
@@ -4848,8 +3181,7 @@ function Modal({
               </label>
 
               <label>
-                {l[3]}
-
+                Completed
                 <input
                   name="completed"
                   type="number"
@@ -4858,71 +3190,33 @@ function Modal({
                 />
               </label>
 
-              <label>
-                {l[4]}
-
-                <select name="status">
-                  <option>
-                    Pending
-                  </option>
-
-                  <option>
-                    In Progress
-                  </option>
-
-                  <option>
-                    Completed
-                  </option>
-                </select>
-              </label>
+              <p className="muted project-edit-note">Remaining images and status are calculated automatically from total images and completed images.</p>
 
               <label>
                 Deadline
-
-                <input
-                  name="deadline"
-                  type="date"
-                />
+                <input name="deadline" type="date" />
               </label>
             </>
           )}
 
-          {type ===
-            "issue" && (
+          {type === "issue" && (
             <>
               <label>
                 {l[2]}
-
-                <input
-                  name="project"
-                  required
-                />
+                <input name="project" required />
               </label>
 
               <label>
                 {l[3]}
-
-                <input
-                  name="owner"
-                  required
-                />
+                <input name="owner" required />
               </label>
 
               <label>
                 {l[4]}
-
                 <select name="severity">
-                  <option>
-                    High
-                  </option>
-
-                  <option>
-                    Medium
-                  </option>
-
-                  <option>
-                    Low
-                  </option>
+                  <option>High</option>
+                  <option>Medium</option>
+                  <option>Low</option>
                 </select>
               </label>
             </>
@@ -4932,21 +3226,12 @@ function Modal({
             <button
               type="button"
               className="secondary"
-              onClick={
-                onClose
-              }
+              onClick={onClose}
             >
               Cancel
             </button>
 
-            <button
-              className="primary"
-              type="submit"
-            >
-              <Save
-                size={17}
-              />
-
+            <button className="primary" type="submit">
               Save record
             </button>
           </div>
@@ -4959,11 +3244,4 @@ function Modal({
 /* =========================================================
    START APP
 ========================================================= */
-
-createRoot(
-  document.getElementById(
-    "root"
-  )
-).render(
-  <App />
-);
+createRoot(document.getElementById("root")).render(<App />);
