@@ -115,8 +115,12 @@ function loadData() {
           })
         : seed.projects,
       issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
-      sheetRecords: Array.isArray(saved.sheetRecords) ? saved.sheetRecords : [],
-      accuracyRecords: Array.isArray(saved.accuracyRecords) ? saved.accuracyRecords : [],
+      sheetRecords: Array.isArray(saved.sheetRecords)
+        ? saved.sheetRecords.map(r => ({ ...r, date: normalizeDateValue(r?.date) }))
+        : [],
+      accuracyRecords: Array.isArray(saved.accuracyRecords)
+        ? saved.accuracyRecords.map(r => ({ ...r, date: normalizeDateValue(r?.date) }))
+        : [],
       accuracyFile: saved.accuracyFile || "",
       accuracyLastSync: saved.accuracyLastSync || ""
     };
@@ -216,10 +220,10 @@ function getTodayISO() {
 
 function getAvailableImportedDates(data) {
   const today = getTodayISO();
-  return [
+  return [...new Set([
     ...(Array.isArray(data?.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
     ...(Array.isArray(data?.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(date => date && date <= today).sort();
+  ].filter(date => date && date <= today))].sort();
 }
 
 function getLatestImportedDate(data) {
@@ -462,6 +466,12 @@ function DashboardApp({ session, profile, onSignOut }) {
           ...seed,
           ...cloud,
           team: Array.isArray(cloud.team) ? cloud.team : seed.team,
+          sheetRecords: Array.isArray(cloud.sheetRecords)
+            ? cloud.sheetRecords.map(r => ({ ...r, date: normalizeDateValue(r?.date) }))
+            : [],
+          accuracyRecords: Array.isArray(cloud.accuracyRecords)
+            ? cloud.accuracyRecords.map(r => ({ ...r, date: normalizeDateValue(r?.date) }))
+            : [],
           projects: Array.isArray(cloud.projects)
             ? cloud.projects.map(p => {
                 const stats = getProjectStats(p);
@@ -1757,9 +1767,9 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
 
     const latestRecords = records.filter(
       x =>
-        x.date === latestDate &&
+        normalizeDateValue(x.date) === latestDate &&
         x.project &&
-        !["Saturday", "Sunday", "On Leave"].includes(x.project)
+        !["Saturday", "Sunday", "On Leave"].includes(String(x.project).trim())
     );
 
     const grouped = {};
@@ -2499,7 +2509,7 @@ function SheetImport({ data, update, notify }) {
           const target = projectNames.reduce((sum, project) => sum + (projectTargets[project] || 0), 0);
           const completed = person.reduce((s, x) => s + (Number(x.worked) || 0), 0);
           const reviewed = person.filter(x => /review/i.test(x.type)).reduce((s, x) => s + (Number(x.worked) || 0), 0);
-          const leave = records.some(x => x.date === today && x.name === name && x.project === "On Leave");
+          const leave = records.some(x => normalizeDateValue(x.date) === today && x.name === name && String(x.project || "").trim() === "On Leave");
 
           return {
             id: 1000 + i,
