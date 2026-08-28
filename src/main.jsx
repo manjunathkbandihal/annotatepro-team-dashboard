@@ -137,6 +137,10 @@ function getConfiguredProjectName(project) {
   return found || clean;
 }
 
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
 function toISODate(year, month, day) {
   const y = Number(year), m = Number(month), d = Number(day);
   if (!y || !m || !d) return "";
@@ -496,7 +500,13 @@ function DashboardApp({ session, profile, onSignOut }) {
                 return { ...p, ...stats, target: stats.total, total: stats.total };
               })
             : seed.projects,
-          issues: Array.isArray(cloud.issues) ? cloud.issues : seed.issues
+          issues: Array.isArray(cloud.issues) ? cloud.issues : seed.issues,
+          sheetRecords: Array.isArray(cloud.sheetRecords) ? cloud.sheetRecords : [],
+          accuracyRecords: Array.isArray(cloud.accuracyRecords) ? cloud.accuracyRecords : [],
+          accuracyFile: cloud.accuracyFile || "",
+          accuracyLastSync: cloud.accuracyLastSync || "",
+          sheetFile: cloud.sheetFile || "",
+          sheetLastSync: cloud.sheetLastSync || ""
         };
         setData(normalized);
         saveData(normalized);
