@@ -166,11 +166,24 @@ function normalizeDateValue(value) {
   const text = String(value).trim();
   if (!text) return "";
 
+  // Prefer an explicit year-first date when present. This also handles
+  // Google Sheets values such as 2026-08-26T00:00:00.000Z.
   let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (m) return toISODate(m[1], m[2], m[3]);
 
+  // For day/month/year text, use the explicit four-digit year position.
+  // Ambiguous US-style values are handled below by the native parser.
   m = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
-  if (m) return toISODate(m[3], m[2], m[1]);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    const y = Number(m[3]);
+    // If one side is > 12, the format is unambiguous. Otherwise keep the
+    // existing day/month convention used by the dashboard.
+    if (a > 12) return toISODate(y, b, a);
+    if (b > 12) return toISODate(y, a, b);
+    return toISODate(y, b, a);
+  }
 
   // Also handle common month-name formats such as 12 Aug 2026 / Aug 12, 2026.
   const parsed = new Date(text);
@@ -2450,15 +2463,27 @@ function SheetImport({ data, update, notify }) {
 
         const dateStarts = [];
 
+        // Google Sheets exports do not always preserve date headers as
+        // JavaScript Date objects. Depending on the sheet formatting, the
+        // header can arrive as an Excel serial number, an ISO string, or a
+        // normal date string. Always normalize the header instead of only
+        // accepting `instanceof Date`.
         for (let c = 1; c < (rows[0]?.length || 0); c++) {
           const v = rows[0][c];
-          if (v instanceof Date) {
-            const pad = n => String(n).padStart(2, "0");
-            dateStarts.push({
-              c,
-              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
-            });
+          const normalizedDate = normalizeDateValue(v);
+          if (normalizedDate) {
+            dateStarts.push({ c, date: normalizedDate });
           }
+        }
+
+        if (!dateStarts.length) {
+          throw new Error(
+            `Could not find any date columns in the Daily Effort Sheet. First-row values: ${(rows[0] || [])
+              .slice(0, 20)
+              .map(v => String(v ?? ""))
+              .filter(Boolean)
+              .join(" | ")}`
+          );
         }
 
         const records = [];
