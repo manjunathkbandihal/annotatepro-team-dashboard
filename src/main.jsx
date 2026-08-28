@@ -115,12 +115,8 @@ function loadData() {
           })
         : seed.projects,
       issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
-      sheetRecords: Array.isArray(saved.sheetRecords)
-        ? saved.sheetRecords.map(r => ({ ...r, date: normalizeDateValue(r?.date) }))
-        : [],
-      accuracyRecords: Array.isArray(saved.accuracyRecords)
-        ? saved.accuracyRecords.map(r => ({ ...r, date: normalizeDateValue(r?.date) }))
-        : [],
+      sheetRecords: Array.isArray(saved.sheetRecords) ? saved.sheetRecords : [],
+      accuracyRecords: Array.isArray(saved.accuracyRecords) ? saved.accuracyRecords : [],
       accuracyFile: saved.accuracyFile || "",
       accuracyLastSync: saved.accuracyLastSync || ""
     };
@@ -164,28 +160,12 @@ function normalizeDateValue(value) {
   }
 
   const text = String(value).trim();
-  if (!text) return "";
-
-  // Prefer an explicit year-first date when present. This also handles
-  // Google Sheets values such as 2026-08-26T00:00:00.000Z.
   let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (m) return toISODate(m[1], m[2], m[3]);
 
-  // For day/month/year text, use the explicit four-digit year position.
-  // Ambiguous US-style values are handled below by the native parser.
   m = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
-  if (m) {
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    const y = Number(m[3]);
-    // If one side is > 12, the format is unambiguous. Otherwise keep the
-    // existing day/month convention used by the dashboard.
-    if (a > 12) return toISODate(y, b, a);
-    if (b > 12) return toISODate(y, a, b);
-    return toISODate(y, b, a);
-  }
+  if (m) return toISODate(m[3], m[2], m[1]);
 
-  // Also handle common month-name formats such as 12 Aug 2026 / Aug 12, 2026.
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime())
     ? ""
@@ -236,10 +216,10 @@ function getTodayISO() {
 
 function getAvailableImportedDates(data) {
   const today = getTodayISO();
-  return [...new Set([
+  return [
     ...(Array.isArray(data?.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
     ...(Array.isArray(data?.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(date => date && date <= today))].sort();
+  ].filter(date => date && date <= today).sort();
 }
 
 function getLatestImportedDate(data) {
@@ -482,12 +462,6 @@ function DashboardApp({ session, profile, onSignOut }) {
           ...seed,
           ...cloud,
           team: Array.isArray(cloud.team) ? cloud.team : seed.team,
-          sheetRecords: Array.isArray(cloud.sheetRecords)
-            ? cloud.sheetRecords.map(r => ({ ...r, date: normalizeDateValue(r?.date) }))
-            : [],
-          accuracyRecords: Array.isArray(cloud.accuracyRecords)
-            ? cloud.accuracyRecords.map(r => ({ ...r, date: normalizeDateValue(r?.date) }))
-            : [],
           projects: Array.isArray(cloud.projects)
             ? cloud.projects.map(p => {
                 const stats = getProjectStats(p);
@@ -1783,9 +1757,9 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
 
     const latestRecords = records.filter(
       x =>
-        normalizeDateValue(x.date) === latestDate &&
+        x.date === latestDate &&
         x.project &&
-        !["Saturday", "Sunday", "On Leave"].includes(String(x.project).trim())
+        !["Saturday", "Sunday", "On Leave"].includes(x.project)
     );
 
     const grouped = {};
@@ -2081,11 +2055,11 @@ function QA({ data }) {
       const selected = available.includes(current?.start) ? current.start : latest;
       return { mode: "single", start: selected, end: selected };
     });
-  }, [data?.sheetRecords, data?.accuracyRecords]);
+  }, [data.sheetRecords, data.accuracyRecords]);
 
   const range = getDateRange(period);
 
-  const allAccuracyRows = Array.isArray(data?.accuracyRecords) ? data.accuracyRecords : [];
+  const allAccuracyRows = Array.isArray(data.accuracyRecords) ? data.accuracyRecords : [];
   const accuracyRows = allAccuracyRows.filter(x => isDateInRange(x.date, range));
 
   const totalDaily = accuracyRows.reduce((s, x) => s + (Number(x.dailyCount) || 0), 0);
@@ -2130,7 +2104,7 @@ function QA({ data }) {
           <div><h2>{totalFP.toLocaleString()}</h2><p className="muted">False positives (FP)</p></div>
           <div><h2>{totalFN.toLocaleString()}</h2><p className="muted">False negatives (FN)</p></div>
           <div><h2>{averageScore.toFixed(1)}</h2><p className="muted">Average score</p></div>
-          <div><h2>{(Array.isArray(data?.issues) ? data.issues : []).filter(x => x?.status === "Open").length}</h2><p className="muted">Open QA issues</p></div>
+          <div><h2>{data.issues.filter(x => x.status === "Open").length}</h2><p className="muted">Open QA issues</p></div>
         </div>
       </Panel>
 
@@ -2262,15 +2236,15 @@ function Analytics({ data }) {
       const selected = available.includes(current?.start) ? current.start : latest;
       return { mode: "single", start: selected, end: selected };
     });
-  }, [data?.sheetRecords, data?.accuracyRecords]);
+  }, [data.sheetRecords, data.accuracyRecords]);
 
   const range = getDateRange(period);
 
-  const sheetRows = Array.isArray(data?.sheetRecords)
+  const sheetRows = Array.isArray(data.sheetRecords)
     ? data.sheetRecords.filter(x => isDateInRange(x.date, range))
     : [];
 
-  const accuracyRows = Array.isArray(data?.accuracyRecords)
+  const accuracyRows = Array.isArray(data.accuracyRecords)
     ? data.accuracyRecords.filter(x => isDateInRange(x.date, range))
     : [];
 
@@ -2304,7 +2278,7 @@ function Analytics({ data }) {
     : 0;
 
   const totalWorked = productivityRows.reduce((s, x) => s + x.completed, 0);
-  const totalTarget = (Array.isArray(data?.team) ? data.team : []).reduce((s, x) => s + (Number(x?.target) || 0), 0);
+  const totalTarget = data.team.reduce((s, x) => s + (Number(x.target) || 0), 0);
 
   return (
     <Page
@@ -2400,27 +2374,17 @@ function SheetImport({ data, update, notify }) {
     return String(value ?? "")
       .trim()
       .toLowerCase()
-      .replace(/[\u00a0]/g, " ")
-      .replace(/[\u2013\u2014]/g, "-")
-      .replace(/[%()\[\]{}:]/g, " ")
-      .replace(/[\/_-]+/g, " ")
-      .replace(/[^a-z0-9 ]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+      .replace(/[%()]/g, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ");
   }
 
   function findHeaderIndex(headers, candidates) {
     const normalized = headers.map(normalizeHeader);
-    const wanted = candidates.map(normalizeHeader).filter(Boolean);
-
-    const exact = normalized.findIndex(h => h && wanted.includes(h));
+    const wanted = candidates.map(normalizeHeader);
+    const exact = normalized.findIndex(h => wanted.includes(h));
     if (exact >= 0) return exact;
-
-    // Prefer a candidate contained in a real header, but do not match empty cells.
-    const partial = normalized.findIndex(h =>
-      h && wanted.some(c => c && (h.includes(c) || c.includes(h)))
-    );
-    return partial;
+    return normalized.findIndex(h => wanted.some(c => h.includes(c) || c.includes(h)));
   }
 
   function parseNumber(value) {
@@ -2463,27 +2427,15 @@ function SheetImport({ data, update, notify }) {
 
         const dateStarts = [];
 
-        // Google Sheets exports do not always preserve date headers as
-        // JavaScript Date objects. Depending on the sheet formatting, the
-        // header can arrive as an Excel serial number, an ISO string, or a
-        // normal date string. Always normalize the header instead of only
-        // accepting `instanceof Date`.
         for (let c = 1; c < (rows[0]?.length || 0); c++) {
           const v = rows[0][c];
-          const normalizedDate = normalizeDateValue(v);
-          if (normalizedDate) {
-            dateStarts.push({ c, date: normalizedDate });
+          if (v instanceof Date) {
+            const pad = n => String(n).padStart(2, "0");
+            dateStarts.push({
+              c,
+              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
+            });
           }
-        }
-
-        if (!dateStarts.length) {
-          throw new Error(
-            `Could not find any date columns in the Daily Effort Sheet. First-row values: ${(rows[0] || [])
-              .slice(0, 20)
-              .map(v => String(v ?? ""))
-              .filter(Boolean)
-              .join(" | ")}`
-          );
         }
 
         const records = [];
@@ -2547,7 +2499,7 @@ function SheetImport({ data, update, notify }) {
           const target = projectNames.reduce((sum, project) => sum + (projectTargets[project] || 0), 0);
           const completed = person.reduce((s, x) => s + (Number(x.worked) || 0), 0);
           const reviewed = person.filter(x => /review/i.test(x.type)).reduce((s, x) => s + (Number(x.worked) || 0), 0);
-          const leave = records.some(x => normalizeDateValue(x.date) === today && x.name === name && String(x.project || "").trim() === "On Leave");
+          const leave = records.some(x => x.date === today && x.name === name && x.project === "On Leave");
 
           return {
             id: 1000 + i,
@@ -2636,92 +2588,85 @@ function SheetImport({ data, update, notify }) {
       try {
         const wb = XLSX.read(e.target.result, {
           type: "array",
-          cellDates: true,
+          cellDates: true
+        });
+
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, {
+          header: 1,
+          defval: null,
           raw: true
         });
 
-        if (!wb.SheetNames?.length) {
-          throw new Error("The workbook has no worksheets.");
+        if (!rows.length) {
+          alert("The Accuracy Report is empty.");
+          return;
         }
 
-        // Accuracy files sometimes have an instruction/title sheet first.
-        // Find the worksheet that actually contains the report headers.
-        let selected = null;
-        let bestScore = -1;
+        // Find the header row even if the sheet has a title above it.
+        let headerRowIndex = -1;
+        let headers = [];
 
-        for (const sheetName of wb.SheetNames) {
-          const candidateWs = wb.Sheets[sheetName];
-          if (!candidateWs) continue;
-          const candidateRows = XLSX.utils.sheet_to_json(candidateWs, {
-            header: 1,
-            defval: null,
-            raw: true
-          });
-
-          for (let r = 0; r < Math.min(candidateRows.length, 25); r++) {
-            const candidate = candidateRows[r] || [];
-            const normalized = candidate.map(normalizeHeader);
-            const hasName = normalized.some(h =>
-              h === "name" || h.includes("team member") || h.includes("employee name") || h.includes("member name") || h.includes("annotator") || h.includes("reviewer")
-            );
-            const hasAccuracy = normalized.some(h => h.includes("accuracy") || h.includes("quality"));
-            const hasTP = normalized.some(h => h === "tp" || h.includes("true positive"));
-            const hasDaily = normalized.some(h => h.includes("daily count") || h.includes("daily output") || h.includes("images count") || h.includes("images reviewed"));
-            const score = (hasName ? 5 : 0) + (hasAccuracy ? 4 : 0) + (hasTP ? 3 : 0) + (hasDaily ? 2 : 0);
-
-            if (score > bestScore) {
-              bestScore = score;
-              selected = { ws: candidateWs, rows: candidateRows, headerRowIndex: r, headers: candidate, sheetName };
-            }
+        for (let r = 0; r < Math.min(rows.length, 10); r++) {
+          const candidate = rows[r] || [];
+          const normalized = candidate.map(normalizeHeader);
+          const hasName = normalized.some(h => ["name", "member", "team member", "employee name"].includes(h));
+          const hasAccuracy = normalized.some(h => h.includes("accuracy"));
+          const hasTP = normalized.some(h => h === "tp" || h.includes("true positive"));
+          if (hasName && (hasAccuracy || hasTP)) {
+            headerRowIndex = r;
+            headers = candidate;
+            break;
           }
         }
 
-        if (!selected || bestScore < 5) {
-          throw new Error("Could not identify an Accuracy Report worksheet/header row.");
+        if (headerRowIndex === -1) {
+          headerRowIndex = 0;
+          headers = rows[0] || [];
         }
 
-        const { rows, headerRowIndex, headers, sheetName } = selected;
-
         const dateIndex = findHeaderIndex(headers, [
-          "date", "report date", "accuracy date", "review date", "qa date", "day", "work date"
+          "date", "report date", "accuracy date", "day"
         ]);
         const nameIndex = findHeaderIndex(headers, [
-          "name", "member", "team member", "employee name", "employee", "member name", "annotator name", "reviewer name", "annotator", "reviewer"
+          "name", "member", "team member", "employee name", "employee"
         ]);
         const dailyCountIndex = findHeaderIndex(headers, [
-          "daily count", "dailycount", "count", "daily output", "images count", "daily images", "images reviewed", "reviewed images", "total reviewed"
+          "daily count", "dailycount", "count", "daily output", "images count", "daily images"
         ]);
         const tpIndex = findHeaderIndex(headers, [
-          "tp", "true positive", "true positives", "tp count", "true positive count"
+          "tp", "true positive", "true positives"
         ]);
         const fpIndex = findHeaderIndex(headers, [
-          "fp", "false positive", "false positives", "fp count", "false positive count"
+          "fp", "false positive", "false positives"
         ]);
         const fnIndex = findHeaderIndex(headers, [
-          "fn", "false negative", "false negatives", "fn count", "false negative count"
+          "fn", "false negative", "false negatives"
         ]);
         const accuracyIndex = findHeaderIndex(headers, [
-          "accuracy", "accuracy percent", "accuracy percentage", "accuracy score", "accuracy result", "qa accuracy", "quality accuracy"
+          "accuracy", "accuracy ", "accuracy percent", "accuracy percentage"
         ]);
         const scoreIndex = findHeaderIndex(headers, [
-          "score", "qa score", "quality score", "review score", "qa result"
+          "score", "qa score", "quality score"
         ]);
         const linkIndex = findHeaderIndex(headers, [
-          "link to the detailed report", "detailed report", "report link", "link", "detailed report link", "report url", "url"
+          "link to the detailed report", "detailed report", "report link", "link", "detailed report link"
         ]);
         const imagesUsedIndex = findHeaderIndex(headers, [
-          "images used for calculating accuracy", "images used", "images used for accuracy", "accuracy images", "images used for calculation", "sample size"
+          "images used for calculating accuracy", "images used", "images used for accuracy", "accuracy images", "images"
         ]);
         const commentIndex = findHeaderIndex(headers, [
-          "comment", "comments", "remark", "remarks", "note", "notes", "qa comment"
+          "comment", "comments", "remark", "remarks", "note", "notes"
         ]);
 
         if (nameIndex === -1) {
-          throw new Error(`Could not find the Name column in worksheet "${sheetName}". Headers: ${headers.filter(Boolean).join(" | ")}`);
+          alert(`Could not find the Name column. Detected headers: ${headers.filter(Boolean).join(" | ")}`);
+          return;
         }
 
-        if (dailyCountIndex === -1 && tpIndex === -1 && fpIndex === -1 && fnIndex === -1 && accuracyIndex === -1 && scoreIndex === -1) {
-          throw new Error(`Could not find Accuracy Report data columns in worksheet "${sheetName}". Headers: ${headers.filter(Boolean).join(" | ")}`);
+        if (dailyCountIndex === -1 && tpIndex === -1 && accuracyIndex === -1) {
+          alert(`Could not find Accuracy Report data columns. Detected headers: ${headers.filter(Boolean).join(" | ")}`);
+          return;
         }
 
         const records = [];
@@ -2747,11 +2692,8 @@ function SheetImport({ data, update, notify }) {
           const imagesUsed = imagesUsedIndex >= 0 ? String(row[imagesUsedIndex] ?? "").trim() : "";
           const comment = commentIndex >= 0 ? String(row[commentIndex] ?? "").trim() : "";
 
-          // Ignore completely empty metric rows instead of creating fake QA records.
-          if (!date && !dailyCount && !tp && !fp && !fn && !accuracy && !score && !link && !imagesUsed && !comment) continue;
-
           records.push({
-            id: `accuracy-${Date.now()}-${r}-${records.length}`,
+            id: `accuracy-${Date.now()}-${r}`,
             date,
             name,
             dailyCount,
@@ -2767,31 +2709,25 @@ function SheetImport({ data, update, notify }) {
         }
 
         if (!records.length) {
-          throw new Error("No team member records were found in the Accuracy Report.");
+          alert("No team member records were found in the Accuracy Report.");
+          return;
         }
 
-        const next = {
+        update({
           ...data,
           accuracyRecords: records,
           accuracyFile: file.name,
           accuracyLastSync: new Date().toISOString()
-        };
+        });
 
-        update(next);
         setAccuracyPreview(records.slice(0, 25));
         notify(`Imported Accuracy Report for ${records.length} team members`);
       } catch (err) {
-        console.error("Accuracy Report import failed:", err);
-        alert(`Could not read this Accuracy Report. ${err?.message || "Please check the workbook and column names."}`);
+        console.error(err);
+        alert("Could not read this Accuracy Report. Please use .xlsx format and check the column names.");
       } finally {
         setAccuracyBusy(false);
       }
-    };
-
-    reader.onerror = () => {
-      console.error("Could not read Accuracy Report file.");
-      alert("Could not read this Accuracy Report file. Please download the Google Sheet again as Microsoft Excel (.xlsx) and try again.");
-      setAccuracyBusy(false);
     };
 
     reader.readAsArrayBuffer(file);
