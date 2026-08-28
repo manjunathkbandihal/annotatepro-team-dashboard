@@ -137,6 +137,10 @@ function getConfiguredProjectName(project) {
   return found || clean;
 }
 
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
 function toISODate(year, month, day) {
   const y = Number(year), m = Number(month), d = Number(day);
   if (!y || !m || !d) return "";
@@ -209,56 +213,48 @@ function isDateInRange(date, range) {
   return normalized >= range.start && normalized <= range.end;
 }
 
-function getTodayISO() {
-  const now = new Date();
-  return toISODate(now.getFullYear(), now.getMonth() + 1, now.getDate());
-}
-
-function getAvailableImportedDates(data) {
-  const today = getTodayISO();
-  return [
+function getLatestImportedDate(data) {
+  const dates = [
     ...(Array.isArray(data?.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
     ...(Array.isArray(data?.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(date => date && date <= today).sort();
-}
+  ].filter(Boolean).sort();
 
-function getLatestImportedDate(data) {
-  const dates = getAvailableImportedDates(data);
   return dates.length ? dates[dates.length - 1] : "";
 }
 
 function DateFilter({ value, onChange, data }) {
-  const allDates = getAvailableImportedDates(data);
+  const allDates = [
+    ...(Array.isArray(data.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
+    ...(Array.isArray(data.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
+  ].filter(Boolean).sort();
+
   const firstDate = allDates[0] || "";
   const lastDate = allDates[allDates.length - 1] || "";
-  const today = getTodayISO();
   const mode = value?.mode || "single";
-
-  const clampDate = date => {
-    const normalized = normalizeDateValue(date);
-    if (!normalized) return "";
-    return normalized > today ? today : normalized;
-  };
 
   const updateFilter = patch => {
     const next = { ...value, ...patch };
-    next.start = clampDate(next.start);
-    next.end = clampDate(next.end);
-    if (next.mode === "single") next.end = next.start || "";
-    if (next.mode === "range" && next.start && next.end && next.end < next.start) {
-      [next.start, next.end] = [next.end, next.start];
+
+    if (next.mode === "single") {
+      next.end = next.start || "";
     }
+
     onChange(next);
   };
 
   const switchMode = nextMode => {
     if (nextMode === "range") {
-      const start = clampDate(value?.start) || firstDate;
-      const end = clampDate(value?.end) || lastDate || start;
-      onChange({ mode: "range", start, end: end < start ? start : end });
+      onChange({
+        mode: "range",
+        start: value?.start || firstDate,
+        end: value?.end || lastDate || value?.start || firstDate
+      });
     } else {
-      const start = clampDate(value?.start) || lastDate;
-      onChange({ mode: "single", start, end: start });
+      onChange({
+        mode: "single",
+        start: value?.start || lastDate,
+        end: value?.start || lastDate
+      });
     }
   };
 
@@ -268,29 +264,64 @@ function DateFilter({ value, onChange, data }) {
         <b>Report date</b>
         <small>
           {mode === "range"
-            ? (value?.start && value?.end ? `${value.start} → ${value.end}` : "Select a start and end date")
+            ? (value?.start && value?.end
+                ? `${value.start} → ${value.end}`
+                : "Select a start and end date")
             : (value?.start || "Select a date")}
         </small>
       </div>
 
       <div className="date-filter-controls">
         <div className="date-filter-mode">
-          <button type="button" className={mode === "single" ? "active" : ""} onClick={() => switchMode("single")}>Single date</button>
-          <button type="button" className={mode === "range" ? "active" : ""} onClick={() => switchMode("range")}>From → To</button>
+          <button
+            type="button"
+            className={mode === "single" ? "active" : ""}
+            onClick={() => switchMode("single")}
+          >
+            Single date
+          </button>
+          <button
+            type="button"
+            className={mode === "range" ? "active" : ""}
+            onClick={() => switchMode("range")}
+          >
+            From → To
+          </button>
         </div>
 
         {mode === "single" ? (
-          <input type="date" value={value?.start || ""} min={firstDate || undefined} max={lastDate || today || undefined} onChange={e => updateFilter({ start: e.target.value })} aria-label="Select report date" />
+          <input
+            type="date"
+            value={value?.start || ""}
+            min={firstDate || undefined}
+            max={lastDate || undefined}
+            onChange={e => updateFilter({ start: e.target.value })}
+            aria-label="Select report date"
+          />
         ) : (
           <div className="date-range-inputs">
             <label>
               <span>From</span>
-              <input type="date" value={value?.start || ""} min={firstDate || undefined} max={value?.end || lastDate || today || undefined} onChange={e => updateFilter({ start: e.target.value })} aria-label="Report start date" />
+              <input
+                type="date"
+                value={value?.start || ""}
+                min={firstDate || undefined}
+                max={value?.end || lastDate || undefined}
+                onChange={e => updateFilter({ start: e.target.value })}
+                aria-label="Report start date"
+              />
             </label>
             <span className="date-range-arrow">→</span>
             <label>
               <span>To</span>
-              <input type="date" value={value?.end || ""} min={value?.start || firstDate || undefined} max={lastDate || today || undefined} onChange={e => updateFilter({ end: e.target.value })} aria-label="Report end date" />
+              <input
+                type="date"
+                value={value?.end || ""}
+                min={value?.start || firstDate || undefined}
+                max={lastDate || undefined}
+                onChange={e => updateFilter({ end: e.target.value })}
+                aria-label="Report end date"
+              />
             </label>
           </div>
         )}
@@ -298,6 +329,7 @@ function DateFilter({ value, onChange, data }) {
     </div>
   );
 }
+
 
 /* =========================================================
    APP
@@ -468,7 +500,13 @@ function DashboardApp({ session, profile, onSignOut }) {
                 return { ...p, ...stats, target: stats.total, total: stats.total };
               })
             : seed.projects,
-          issues: Array.isArray(cloud.issues) ? cloud.issues : seed.issues
+          issues: Array.isArray(cloud.issues) ? cloud.issues : seed.issues,
+          sheetRecords: Array.isArray(cloud.sheetRecords) ? cloud.sheetRecords : [],
+          accuracyRecords: Array.isArray(cloud.accuracyRecords) ? cloud.accuracyRecords : [],
+          accuracyFile: cloud.accuracyFile || "",
+          accuracyLastSync: cloud.accuracyLastSync || "",
+          sheetFile: cloud.sheetFile || "",
+          sheetLastSync: cloud.sheetLastSync || ""
         };
         setData(normalized);
         saveData(normalized);
@@ -1744,13 +1782,8 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
       }));
     }
 
-    const today = getTodayISO();
     const dates = [
-      ...new Set(
-        records
-          .map(x => normalizeDateValue(x.date))
-          .filter(date => date && date <= today)
-      )
+      ...new Set(records.map(x => x.date).filter(Boolean))
     ].sort();
 
     const latestDate = dates[dates.length - 1];
@@ -1826,7 +1859,9 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
     data.sheetRecords.length > 0;
 
   const latestDate = imported
-    ? getLatestImportedDate({ sheetRecords: data.sheetRecords, accuracyRecords: [] })
+    ? [...new Set(data.sheetRecords.map(x => x.date).filter(Boolean))]
+        .sort()
+        .pop()
     : null;
 
   return (
@@ -2039,24 +2074,6 @@ function QA({ data }) {
     start: latestDate,
     end: latestDate
   }));
-
-  useEffect(() => {
-    setPeriod(current => {
-      const available = getAvailableImportedDates(data);
-      const latest = available[available.length - 1] || "";
-      if (!latest) return { mode: current?.mode || "single", start: "", end: "" };
-
-      if (current?.mode === "range") {
-        const start = available.includes(current.start) ? current.start : latest;
-        const end = available.includes(current.end) ? current.end : latest;
-        return { mode: "range", start: start <= end ? start : end, end: start <= end ? end : start };
-      }
-
-      const selected = available.includes(current?.start) ? current.start : latest;
-      return { mode: "single", start: selected, end: selected };
-    });
-  }, [data.sheetRecords, data.accuracyRecords]);
-
   const range = getDateRange(period);
 
   const allAccuracyRows = Array.isArray(data.accuracyRecords) ? data.accuracyRecords : [];
@@ -2220,24 +2237,6 @@ function Analytics({ data }) {
     start: latestDate,
     end: latestDate
   }));
-
-  useEffect(() => {
-    setPeriod(current => {
-      const available = getAvailableImportedDates(data);
-      const latest = available[available.length - 1] || "";
-      if (!latest) return { mode: current?.mode || "single", start: "", end: "" };
-
-      if (current?.mode === "range") {
-        const start = available.includes(current.start) ? current.start : latest;
-        const end = available.includes(current.end) ? current.end : latest;
-        return { mode: "range", start: start <= end ? start : end, end: start <= end ? end : start };
-      }
-
-      const selected = available.includes(current?.start) ? current.start : latest;
-      return { mode: "single", start: selected, end: selected };
-    });
-  }, [data.sheetRecords, data.accuracyRecords]);
-
   const range = getDateRange(period);
 
   const sheetRows = Array.isArray(data.sheetRecords)
@@ -2480,15 +2479,8 @@ function SheetImport({ data, update, notify }) {
           }
         }
 
-        const currentDate = getTodayISO();
-        const workDates = [
-          ...new Set(
-            records
-              .map(x => normalizeDateValue(x.date))
-              .filter(date => date && date <= currentDate)
-          )
-        ].sort();
-        const today = workDates[workDates.length - 1] || currentDate;
+        const workDates = [...new Set(records.map(x => x.date).filter(Boolean))].sort();
+        const today = workDates[workDates.length - 1] || new Date().toISOString().slice(0, 10);
         const todayRows = records.filter(
           x => x.date === today && !["Saturday", "Sunday", "On Leave"].includes(x.project)
         );
