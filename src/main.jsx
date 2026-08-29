@@ -2903,30 +2903,41 @@ function extractScreenshotDate(text) {
   return candidates[0] || null;
 }
 
-function extractScreenshotRows(text, team) {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map(x => x.replace(/\s+/g, " ").trim())
+function extractScreenshotRows(text, team, ocrLines = null) {
+  // Prefer Tesseract's line objects when available. They preserve visual row
+  // boundaries much better than splitting the flattened OCR text by \n.
+  const sourceLines = Array.isArray(ocrLines) && ocrLines.length
+    ? ocrLines.map(x => typeof x === "string" ? x : (x?.text || ""))
+    : String(text || "").split(/\r?\n/);
+
+  const lines = sourceLines
+    .map(x => String(x || "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
-  const names = Array.isArray(team) ? team.map(x => String(x.name || "").trim()).filter(Boolean) : [];
+  const names = Array.isArray(team)
+    ? team.map(x => String(x.name || "").trim()).filter(Boolean)
+    : [];
+
   const nameMatchers = names
     .sort((a, b) => b.length - a.length)
     .map(name => ({ name, lower: name.toLowerCase() }));
 
-  const projectNames = Object.keys(projectTargets);
+  const projectNames = Object.keys(projectTargets || {});
   const rows = [];
-  let currentName = "";
 
   function cleanNumberToken(token) {
-    const cleaned = String(token || "").replace(/[,]/g, "").trim();
+    const cleaned = String(token || "")
+      .replace(/,/g, "")
+      .replace(/[Oo]/g, "0")
+      .replace(/[Il]/g, "1")
+      .trim();
     if (!/^\d+(?:\.\d+)?$/.test(cleaned)) return null;
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : null;
   }
 
   function extractNumbers(line) {
-    const tokens = String(line || "").match(/\b\d+(?:,\d{3})*(?:\.\d+)?\b/g) || [];
+    const tokens = String(line || "").match(/\b\d[\d,]*(?:\.\d+)?\b/g) || [];
     return tokens.map(cleanNumberToken).filter(n => n != null);
   }
 
@@ -2937,43 +2948,73 @@ function extractScreenshotRows(text, team) {
 
   function findProject(line) {
     const lower = line.toLowerCase();
-    const found = projectNames.find(p => lower.includes(p.toLowerCase()));
-    return found || "";
+    return projectNames.find(p => lower.includes(p.toLowerCase())) || "";
   }
 
+  function looksLikeHeader(line) {
+    return /(date\s*name|name\s*project|images\s*worked|total|target|remaining|status|employee|team member)/i.test(line);
+  }
+
+  // First pass: one visual OCR line should represent one spreadsheet row.
   lines.forEach(line => {
-    const foundName = findName(line);
-    if (foundName) currentName = foundName;
-    if (!currentName) return;
+    if (looksLikeHeader(line)) return;
+    const name = findName(line);
+    if (!name) return;
 
     const numbers = extractNumbers(line);
     if (!numbers.length) return;
 
-    // In a screenshot row, the final numeric value is normally the
-    // completed/worked-image column. Ignore obvious date fragments.
+    // Use the right-most numeric value on the same visual row. This avoids
+    // taking the day/month/year fragments when a date is printed first.
     const worked = numbers[numbers.length - 1];
-    if (worked == null || worked < 0) return;
+    if (!Number.isFinite(worked) || worked < 0) return;
 
     const project = findProject(line);
-    const isLeave = /on leave/i.test(line);
+    const isLeave = /\bon leave\b/i.test(line);
     const isWeekend = /\b(saturday|sunday)\b/i.test(line);
     if (isLeave || isWeekend) return;
 
     rows.push({
-      name: currentName,
+      name,
       project: project || "Screenshot Import",
-      type: /review/i.test(line) ? "Review" : "Annotation",
+      type: /\breview\b/i.test(line) ? "Review" : "Annotation",
       worked,
       sourceText: line
     });
   });
 
-  // Collapse duplicates produced by OCR wrapping the same row across lines.
+  // If OCR split a spreadsheet row across multiple lines, join adjacent lines
+  // around a known team member and recover the numeric value from the group.
+  if (!rows.length) {
+    for (let i = 0; i < lines.length; i++) {
+      const name = findName(lines[i]);
+      if (!name) continue;
+      const group = [lines[i], lines[i + 1] || "", lines[i + 2] || ""].join(" ");
+      const numbers = extractNumbers(group);
+      if (!numbers.length) continue;
+      const worked = numbers[numbers.length - 1];
+      if (!Number.isFinite(worked)) continue;
+      rows.push({
+        name,
+        project: findProject(group) || "Screenshot Import",
+        type: /\breview\b/i.test(group) ? "Review" : "Annotation",
+        worked,
+        sourceText: group
+      });
+    }
+  }
+
+  // Collapse duplicate OCR lines for the same member/project/type. If OCR
+  // sees the same row twice, keep the largest numeric value because the
+  // worked-image value is normally the right-most/highest count.
   const grouped = {};
   rows.forEach(row => {
     const key = `${row.name}::${row.project}::${row.type}`;
     if (!grouped[key]) grouped[key] = { ...row };
-    else if (row.worked > grouped[key].worked) grouped[key].worked = row.worked;
+    else if (Number(row.worked) > Number(grouped[key].worked)) {
+      grouped[key].worked = row.worked;
+      grouped[key].sourceText = row.sourceText;
+    }
   });
 
   return Object.values(grouped);
@@ -3215,15 +3256,40 @@ function SheetImport({ data, update, notify }) {
       });
 
       const text = result?.data?.text || "";
+      const ocrLines = Array.isArray(result?.data?.lines)
+        ? result.data.lines.map(line => ({ text: line?.text || "", bbox: line?.bbox || null }))
+        : [];
       setScreenshotText(text);
 
-      const detected = extractScreenshotDate(text);
+      let detected = extractScreenshotDate(text);
+
+      // Daily screenshots are normally for the current operational year.
+      // OCR can easily read the final digit of 2026 as 2025/2028. When the
+      // detected month/day is within a short window of today, prefer the
+      // current year. This prevents a one-digit OCR error from shifting the
+      // entire day's data into the wrong year/date bucket.
+      if (detected?.date) {
+        const now = new Date();
+        const parts = detected.date.split("-").map(Number);
+        if (parts.length === 3 && parts.every(Number.isFinite)) {
+          const [yy, mm, dd] = parts;
+          const candidate = new Date(yy, mm - 1, dd);
+          const currentYearCandidate = new Date(now.getFullYear(), mm - 1, dd);
+          const diffDays = Math.abs(currentYearCandidate.getTime() - now.getTime()) / 86400000;
+          const detectedDiffDays = Math.abs(candidate.getTime() - now.getTime()) / 86400000;
+          if (diffDays <= 7 && detectedDiffDays > diffDays + 300) {
+            const pad = n => String(n).padStart(2, "0");
+            detected = { ...detected, date: `${now.getFullYear()}-${pad(mm)}-${pad(dd)}` };
+          }
+        }
+      }
+
       if (!detected?.date) {
         alert("Could not detect a date in this screenshot. Please use a clear screenshot containing the daily date.");
         return;
       }
 
-      const parsedRows = extractScreenshotRows(text, data.team);
+      const parsedRows = extractScreenshotRows(text, data.team, ocrLines);
       if (!parsedRows.length) {
         alert("The date was detected, but no team-member work rows could be detected. Please use a clear screenshot of the daily sheet.");
         return;
