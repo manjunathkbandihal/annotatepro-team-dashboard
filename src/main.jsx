@@ -115,8 +115,12 @@ function loadData() {
           })
         : seed.projects,
       issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
-      sheetRecords: Array.isArray(saved.sheetRecords) ? saved.sheetRecords : [],
-      accuracyRecords: Array.isArray(saved.accuracyRecords) ? saved.accuracyRecords : [],
+      sheetRecords: Array.isArray(saved.sheetRecords)
+        ? saved.sheetRecords.map(x => ({ ...x, date: normalizeDateValue(x.date) }))
+        : [],
+      accuracyRecords: Array.isArray(saved.accuracyRecords)
+        ? saved.accuracyRecords.map(x => ({ ...x, date: normalizeDateValue(x.date) }))
+        : [],
       accuracyFile: saved.accuracyFile || "",
       accuracyLastSync: saved.accuracyLastSync || ""
     };
@@ -135,10 +139,6 @@ function getConfiguredProjectName(project) {
     name => name.toLowerCase() === clean.toLowerCase()
   );
   return found || clean;
-}
-
-function pad2(value) {
-  return String(value).padStart(2, "0");
 }
 
 function toISODate(year, month, day) {
@@ -164,12 +164,27 @@ function normalizeDateValue(value) {
   }
 
   const text = String(value).trim();
-  let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (!text) return "";
+
+  // ISO / YYYY-MM-DD (also accepts / or . separators).
+  let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:$|\s|T)/);
   if (m) return toISODate(m[1], m[2], m[3]);
 
-  m = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
-  if (m) return toISODate(m[3], m[2], m[1]);
+  // The dashboard's Google Sheet format is MM/DD/YYYY.
+  // If the first value is > 12, also accept DD/MM/YYYY so dates such as
+  // 28/08/2026 remain valid. For ambiguous values (07/12/2026), MM/DD/YYYY
+  // is intentionally preferred because that is the sheet's documented format.
+  m = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:$|\s|T)/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    const y = Number(m[3]);
+    if (a > 12 && b <= 12) return toISODate(y, b, a);
+    if (b > 12 && a <= 12) return toISODate(y, a, b);
+    return toISODate(y, a, b);
+  }
 
+  // Handle common Google/Excel date strings such as "Aug 28, 2026".
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime())
     ? ""
@@ -213,48 +228,56 @@ function isDateInRange(date, range) {
   return normalized >= range.start && normalized <= range.end;
 }
 
-function getLatestImportedDate(data) {
-  const dates = [
+function getTodayISO() {
+  const now = new Date();
+  return toISODate(now.getFullYear(), now.getMonth() + 1, now.getDate());
+}
+
+function getAvailableImportedDates(data) {
+  const today = getTodayISO();
+  return [
     ...(Array.isArray(data?.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
     ...(Array.isArray(data?.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(Boolean).sort();
+  ].filter(date => date && date <= today).sort();
+}
 
+function getLatestImportedDate(data) {
+  const dates = getAvailableImportedDates(data);
   return dates.length ? dates[dates.length - 1] : "";
 }
 
 function DateFilter({ value, onChange, data }) {
-  const allDates = [
-    ...(Array.isArray(data.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
-    ...(Array.isArray(data.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(Boolean).sort();
-
+  const allDates = getAvailableImportedDates(data);
   const firstDate = allDates[0] || "";
   const lastDate = allDates[allDates.length - 1] || "";
+  const today = getTodayISO();
   const mode = value?.mode || "single";
+
+  const clampDate = date => {
+    const normalized = normalizeDateValue(date);
+    if (!normalized) return "";
+    return normalized > today ? today : normalized;
+  };
 
   const updateFilter = patch => {
     const next = { ...value, ...patch };
-
-    if (next.mode === "single") {
-      next.end = next.start || "";
+    next.start = clampDate(next.start);
+    next.end = clampDate(next.end);
+    if (next.mode === "single") next.end = next.start || "";
+    if (next.mode === "range" && next.start && next.end && next.end < next.start) {
+      [next.start, next.end] = [next.end, next.start];
     }
-
     onChange(next);
   };
 
   const switchMode = nextMode => {
     if (nextMode === "range") {
-      onChange({
-        mode: "range",
-        start: value?.start || firstDate,
-        end: value?.end || lastDate || value?.start || firstDate
-      });
+      const start = clampDate(value?.start) || firstDate;
+      const end = clampDate(value?.end) || lastDate || start;
+      onChange({ mode: "range", start, end: end < start ? start : end });
     } else {
-      onChange({
-        mode: "single",
-        start: value?.start || lastDate,
-        end: value?.start || lastDate
-      });
+      const start = clampDate(value?.start) || lastDate;
+      onChange({ mode: "single", start, end: start });
     }
   };
 
@@ -264,64 +287,29 @@ function DateFilter({ value, onChange, data }) {
         <b>Report date</b>
         <small>
           {mode === "range"
-            ? (value?.start && value?.end
-                ? `${value.start} → ${value.end}`
-                : "Select a start and end date")
+            ? (value?.start && value?.end ? `${value.start} → ${value.end}` : "Select a start and end date")
             : (value?.start || "Select a date")}
         </small>
       </div>
 
       <div className="date-filter-controls">
         <div className="date-filter-mode">
-          <button
-            type="button"
-            className={mode === "single" ? "active" : ""}
-            onClick={() => switchMode("single")}
-          >
-            Single date
-          </button>
-          <button
-            type="button"
-            className={mode === "range" ? "active" : ""}
-            onClick={() => switchMode("range")}
-          >
-            From → To
-          </button>
+          <button type="button" className={mode === "single" ? "active" : ""} onClick={() => switchMode("single")}>Single date</button>
+          <button type="button" className={mode === "range" ? "active" : ""} onClick={() => switchMode("range")}>From → To</button>
         </div>
 
         {mode === "single" ? (
-          <input
-            type="date"
-            value={value?.start || ""}
-            min={firstDate || undefined}
-            max={lastDate || undefined}
-            onChange={e => updateFilter({ start: e.target.value })}
-            aria-label="Select report date"
-          />
+          <input type="date" value={value?.start || ""} min={firstDate || undefined} max={lastDate || today || undefined} onChange={e => updateFilter({ start: e.target.value })} aria-label="Select report date" />
         ) : (
           <div className="date-range-inputs">
             <label>
               <span>From</span>
-              <input
-                type="date"
-                value={value?.start || ""}
-                min={firstDate || undefined}
-                max={value?.end || lastDate || undefined}
-                onChange={e => updateFilter({ start: e.target.value })}
-                aria-label="Report start date"
-              />
+              <input type="date" value={value?.start || ""} min={firstDate || undefined} max={value?.end || lastDate || today || undefined} onChange={e => updateFilter({ start: e.target.value })} aria-label="Report start date" />
             </label>
             <span className="date-range-arrow">→</span>
             <label>
               <span>To</span>
-              <input
-                type="date"
-                value={value?.end || ""}
-                min={value?.start || firstDate || undefined}
-                max={lastDate || undefined}
-                onChange={e => updateFilter({ end: e.target.value })}
-                aria-label="Report end date"
-              />
+              <input type="date" value={value?.end || ""} min={value?.start || firstDate || undefined} max={lastDate || today || undefined} onChange={e => updateFilter({ end: e.target.value })} aria-label="Report end date" />
             </label>
           </div>
         )}
@@ -329,7 +317,6 @@ function DateFilter({ value, onChange, data }) {
     </div>
   );
 }
-
 
 /* =========================================================
    APP
@@ -501,12 +488,16 @@ function DashboardApp({ session, profile, onSignOut }) {
               })
             : seed.projects,
           issues: Array.isArray(cloud.issues) ? cloud.issues : seed.issues,
-          sheetRecords: Array.isArray(cloud.sheetRecords) ? cloud.sheetRecords : [],
-          accuracyRecords: Array.isArray(cloud.accuracyRecords) ? cloud.accuracyRecords : [],
-          accuracyFile: cloud.accuracyFile || "",
-          accuracyLastSync: cloud.accuracyLastSync || "",
+          sheetRecords: Array.isArray(cloud.sheetRecords)
+            ? cloud.sheetRecords.map(x => ({ ...x, date: normalizeDateValue(x.date) }))
+            : [],
+          accuracyRecords: Array.isArray(cloud.accuracyRecords)
+            ? cloud.accuracyRecords.map(x => ({ ...x, date: normalizeDateValue(x.date) }))
+            : [],
           sheetFile: cloud.sheetFile || "",
-          sheetLastSync: cloud.sheetLastSync || ""
+          sheetLastSync: cloud.sheetLastSync || "",
+          accuracyFile: cloud.accuracyFile || "",
+          accuracyLastSync: cloud.accuracyLastSync || ""
         };
         setData(normalized);
         saveData(normalized);
@@ -1782,15 +1773,20 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
       }));
     }
 
+    const today = getTodayISO();
     const dates = [
-      ...new Set(records.map(x => x.date).filter(Boolean))
+      ...new Set(
+        records
+          .map(x => normalizeDateValue(x.date))
+          .filter(date => date && date <= today)
+      )
     ].sort();
 
     const latestDate = dates[dates.length - 1];
 
     const latestRecords = records.filter(
       x =>
-        x.date === latestDate &&
+        normalizeDateValue(x.date) === latestDate &&
         x.project &&
         !["Saturday", "Sunday", "On Leave"].includes(x.project)
     );
@@ -1859,9 +1855,7 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
     data.sheetRecords.length > 0;
 
   const latestDate = imported
-    ? [...new Set(data.sheetRecords.map(x => x.date).filter(Boolean))]
-        .sort()
-        .pop()
+    ? getLatestImportedDate({ sheetRecords: data.sheetRecords, accuracyRecords: [] })
     : null;
 
   return (
@@ -2074,6 +2068,24 @@ function QA({ data }) {
     start: latestDate,
     end: latestDate
   }));
+
+  useEffect(() => {
+    setPeriod(current => {
+      const available = getAvailableImportedDates(data);
+      const latest = available[available.length - 1] || "";
+      if (!latest) return { mode: current?.mode || "single", start: "", end: "" };
+
+      if (current?.mode === "range") {
+        const start = available.includes(current.start) ? current.start : latest;
+        const end = available.includes(current.end) ? current.end : latest;
+        return { mode: "range", start: start <= end ? start : end, end: start <= end ? end : start };
+      }
+
+      const selected = available.includes(current?.start) ? current.start : latest;
+      return { mode: "single", start: selected, end: selected };
+    });
+  }, [data.sheetRecords, data.accuracyRecords]);
+
   const range = getDateRange(period);
 
   const allAccuracyRows = Array.isArray(data.accuracyRecords) ? data.accuracyRecords : [];
@@ -2237,6 +2249,24 @@ function Analytics({ data }) {
     start: latestDate,
     end: latestDate
   }));
+
+  useEffect(() => {
+    setPeriod(current => {
+      const available = getAvailableImportedDates(data);
+      const latest = available[available.length - 1] || "";
+      if (!latest) return { mode: current?.mode || "single", start: "", end: "" };
+
+      if (current?.mode === "range") {
+        const start = available.includes(current.start) ? current.start : latest;
+        const end = available.includes(current.end) ? current.end : latest;
+        return { mode: "range", start: start <= end ? start : end, end: start <= end ? end : start };
+      }
+
+      const selected = available.includes(current?.start) ? current.start : latest;
+      return { mode: "single", start: selected, end: selected };
+    });
+  }, [data.sheetRecords, data.accuracyRecords]);
+
   const range = getDateRange(period);
 
   const sheetRows = Array.isArray(data.sheetRecords)
@@ -2426,14 +2456,14 @@ function SheetImport({ data, update, notify }) {
 
         const dateStarts = [];
 
+        // Google Sheets exports may store date headers as Excel Date objects,
+        // serial numbers, or plain MM/DD/YYYY strings. Do not rely only on
+        // instanceof Date, otherwise the whole imported sheet can disappear.
         for (let c = 1; c < (rows[0]?.length || 0); c++) {
           const v = rows[0][c];
-          if (v instanceof Date) {
-            const pad = n => String(n).padStart(2, "0");
-            dateStarts.push({
-              c,
-              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
-            });
+          const date = normalizeDateValue(v);
+          if (date) {
+            dateStarts.push({ c, date });
           }
         }
 
@@ -2479,10 +2509,17 @@ function SheetImport({ data, update, notify }) {
           }
         }
 
-        const workDates = [...new Set(records.map(x => x.date).filter(Boolean))].sort();
-        const today = workDates[workDates.length - 1] || new Date().toISOString().slice(0, 10);
+        const currentDate = getTodayISO();
+        const workDates = [
+          ...new Set(
+            records
+              .map(x => normalizeDateValue(x.date))
+              .filter(date => date && date <= currentDate)
+          )
+        ].sort();
+        const today = workDates[workDates.length - 1] || currentDate;
         const todayRows = records.filter(
-          x => x.date === today && !["Saturday", "Sunday", "On Leave"].includes(x.project)
+          x => normalizeDateValue(x.date) === today && !["Saturday", "Sunday", "On Leave"].includes(x.project)
         );
 
         const team = names.map((name, i) => {
