@@ -154,7 +154,10 @@ function normalizeDateValue(value) {
   if (value == null || value === "") return "";
 
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return toISODate(value.getFullYear(), value.getMonth() + 1, value.getDate());
+    // Spreadsheet date cells are calendar dates, not user-local timestamps.
+    // Use UTC components so an Excel/Google Sheets date cannot move to the
+    // previous/next day because of the browser timezone.
+    return toISODate(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate());
   }
 
   if (typeof value === "number" && Number.isFinite(value) && value > 20000 && value < 80000) {
@@ -167,8 +170,10 @@ function normalizeDateValue(value) {
   let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (m) return toISODate(m[1], m[2], m[3]);
 
+  // Google Sheets / Excel exports commonly use MM/DD/YYYY.
+  // Treat the first component as month and the second as day.
   m = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
-  if (m) return toISODate(m[3], m[2], m[1]);
+  if (m) return toISODate(m[3], m[1], m[2]);
 
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime())
