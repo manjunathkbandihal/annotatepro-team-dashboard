@@ -6,7 +6,7 @@ import {
   AlertTriangle, BarChart3, Settings, Search, Plus, Bell,
   Download, Upload, Menu, X, CheckCircle2, Target,
   Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
-  LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, Camera
+  LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
@@ -511,11 +511,7 @@ function DashboardApp({ session, profile, onSignOut }) {
           accuracyFile: cloud.accuracyFile || "",
           accuracyLastSync: cloud.accuracyLastSync || "",
           sheetFile: cloud.sheetFile || "",
-          sheetLastSync: cloud.sheetLastSync || "",
-          screenshotFile: cloud.screenshotFile || "",
-          screenshotLastSync: cloud.screenshotLastSync || "",
-          screenshotDetectedDate: cloud.screenshotDetectedDate || "",
-          screenshotImportCount: Number(cloud.screenshotImportCount) || 0
+          sheetLastSync: cloud.sheetLastSync || ""
         };
         setData(normalized);
         saveData(normalized);
@@ -2825,202 +2821,6 @@ function Analytics({ data }) {
 }
 
 /* =========================================================
-   DAILY SCREENSHOT IMPORT
-   Uses browser OCR (Tesseract.js) to detect the date and daily
-   team output from a screenshot of the working sheet.
-========================================================= */
-let tesseractLoaderPromise = null;
-
-function loadTesseract() {
-  if (typeof window === "undefined") return Promise.reject(new Error("Browser OCR is unavailable."));
-  if (window.Tesseract) return Promise.resolve(window.Tesseract);
-  if (tesseractLoaderPromise) return tesseractLoaderPromise;
-
-  tesseractLoaderPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-annotatepro-tesseract="1"]');
-    if (existing) {
-      existing.addEventListener("load", () => window.Tesseract ? resolve(window.Tesseract) : reject(new Error("OCR library did not load.")), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Could not load OCR library.")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-    script.async = true;
-    script.dataset.annotateproTesseract = "1";
-    script.onload = () => window.Tesseract ? resolve(window.Tesseract) : reject(new Error("OCR library did not load."));
-    script.onerror = () => reject(new Error("Could not load OCR library from CDN."));
-    document.head.appendChild(script);
-  });
-
-  return tesseractLoaderPromise;
-}
-
-function extractScreenshotDate(text) {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map(x => x.trim())
-    .filter(Boolean);
-
-  const patterns = [
-    /\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/g,
-    /\b(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})\b/g,
-    /\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*,?\s*(\d{4})\b/gi,
-    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})\s*,?\s*(\d{4})\b/gi
-  ];
-
-  const monthMap = {
-    jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
-    apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
-    aug: 8, august: 8, sep: 9, september: 9, oct: 10, october: 10,
-    nov: 11, november: 11, dec: 12, december: 12
-  };
-
-  const candidates = [];
-  const pushCandidate = (date, score, raw, line) => {
-    if (date) candidates.push({ date, score, raw, line });
-  };
-
-  lines.forEach(line => {
-    const lower = line.toLowerCase();
-    const labelBoost = /(date|report date|work date|day|daily)/i.test(lower) ? 20 : 0;
-
-    let m;
-    const p1 = new RegExp(patterns[0].source, "g");
-    while ((m = p1.exec(line))) pushCandidate(toISODate(m[1], m[2], m[3]), 30 + labelBoost, m[0], line);
-
-    const p2 = new RegExp(patterns[1].source, "g");
-    while ((m = p2.exec(line))) pushCandidate(toISODate(m[3], m[1], m[2]), 25 + labelBoost, m[0], line);
-
-    const p3 = new RegExp(patterns[2].source, "gi");
-    while ((m = p3.exec(line))) pushCandidate(toISODate(m[3], monthMap[String(m[2]).toLowerCase()], m[1]), 22 + labelBoost, m[0], line);
-
-    const p4 = new RegExp(patterns[3].source, "gi");
-    while ((m = p4.exec(line))) pushCandidate(toISODate(m[3], monthMap[String(m[1]).toLowerCase()], m[2]), 22 + labelBoost, m[0], line);
-  });
-
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0] || null;
-}
-
-function extractScreenshotRows(text, team, ocrLines = null) {
-  // Prefer Tesseract's line objects when available. They preserve visual row
-  // boundaries much better than splitting the flattened OCR text by \n.
-  const sourceLines = Array.isArray(ocrLines) && ocrLines.length
-    ? ocrLines.map(x => typeof x === "string" ? x : (x?.text || ""))
-    : String(text || "").split(/\r?\n/);
-
-  const lines = sourceLines
-    .map(x => String(x || "").replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-
-  const names = Array.isArray(team)
-    ? team.map(x => String(x.name || "").trim()).filter(Boolean)
-    : [];
-
-  const nameMatchers = names
-    .sort((a, b) => b.length - a.length)
-    .map(name => ({ name, lower: name.toLowerCase() }));
-
-  const projectNames = Object.keys(projectTargets || {});
-  const rows = [];
-
-  function cleanNumberToken(token) {
-    const cleaned = String(token || "")
-      .replace(/,/g, "")
-      .replace(/[Oo]/g, "0")
-      .replace(/[Il]/g, "1")
-      .trim();
-    if (!/^\d+(?:\.\d+)?$/.test(cleaned)) return null;
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  function extractNumbers(line) {
-    const tokens = String(line || "").match(/\b\d[\d,]*(?:\.\d+)?\b/g) || [];
-    return tokens.map(cleanNumberToken).filter(n => n != null);
-  }
-
-  function findName(line) {
-    const lower = line.toLowerCase();
-    return nameMatchers.find(x => lower.includes(x.lower))?.name || "";
-  }
-
-  function findProject(line) {
-    const lower = line.toLowerCase();
-    return projectNames.find(p => lower.includes(p.toLowerCase())) || "";
-  }
-
-  function looksLikeHeader(line) {
-    return /(date\s*name|name\s*project|images\s*worked|total|target|remaining|status|employee|team member)/i.test(line);
-  }
-
-  // First pass: one visual OCR line should represent one spreadsheet row.
-  lines.forEach(line => {
-    if (looksLikeHeader(line)) return;
-    const name = findName(line);
-    if (!name) return;
-
-    const numbers = extractNumbers(line);
-    if (!numbers.length) return;
-
-    // Use the right-most numeric value on the same visual row. This avoids
-    // taking the day/month/year fragments when a date is printed first.
-    const worked = numbers[numbers.length - 1];
-    if (!Number.isFinite(worked) || worked < 0) return;
-
-    const project = findProject(line);
-    const isLeave = /\bon leave\b/i.test(line);
-    const isWeekend = /\b(saturday|sunday)\b/i.test(line);
-    if (isLeave || isWeekend) return;
-
-    rows.push({
-      name,
-      project: project || "Screenshot Import",
-      type: /\breview\b/i.test(line) ? "Review" : "Annotation",
-      worked,
-      sourceText: line
-    });
-  });
-
-  // If OCR split a spreadsheet row across multiple lines, join adjacent lines
-  // around a known team member and recover the numeric value from the group.
-  if (!rows.length) {
-    for (let i = 0; i < lines.length; i++) {
-      const name = findName(lines[i]);
-      if (!name) continue;
-      const group = [lines[i], lines[i + 1] || "", lines[i + 2] || ""].join(" ");
-      const numbers = extractNumbers(group);
-      if (!numbers.length) continue;
-      const worked = numbers[numbers.length - 1];
-      if (!Number.isFinite(worked)) continue;
-      rows.push({
-        name,
-        project: findProject(group) || "Screenshot Import",
-        type: /\breview\b/i.test(group) ? "Review" : "Annotation",
-        worked,
-        sourceText: group
-      });
-    }
-  }
-
-  // Collapse duplicate OCR lines for the same member/project/type. If OCR
-  // sees the same row twice, keep the largest numeric value because the
-  // worked-image value is normally the right-most/highest count.
-  const grouped = {};
-  rows.forEach(row => {
-    const key = `${row.name}::${row.project}::${row.type}`;
-    if (!grouped[key]) grouped[key] = { ...row };
-    else if (Number(row.worked) > Number(grouped[key].worked)) {
-      grouped[key].worked = row.worked;
-      grouped[key].sourceText = row.sourceText;
-    }
-  });
-
-  return Object.values(grouped);
-}
-
-/* =========================================================
    SHEET IMPORT
 ========================================================= */
 function SheetImport({ data, update, notify }) {
@@ -3030,11 +2830,6 @@ function SheetImport({ data, update, notify }) {
   const [accuracyFileName, setAccuracyFileName] = useState(data.accuracyFile || "");
   const [busy, setBusy] = useState(false);
   const [accuracyBusy, setAccuracyBusy] = useState(false);
-  const [screenshotBusy, setScreenshotBusy] = useState(false);
-  const [screenshotPreview, setScreenshotPreview] = useState([]);
-  const [screenshotText, setScreenshotText] = useState("");
-  const [screenshotDate, setScreenshotDate] = useState(data.screenshotDetectedDate || "");
-  const [screenshotFileName, setScreenshotFileName] = useState(data.screenshotFile || "");
 
   function normalizeHeader(value) {
     return String(value ?? "")
@@ -3095,12 +2890,14 @@ function SheetImport({ data, update, notify }) {
 
         for (let c = 1; c < (rows[0]?.length || 0); c++) {
           const v = rows[0][c];
-          if (v instanceof Date) {
-            const pad = n => String(n).padStart(2, "0");
-            dateStarts.push({
-              c,
-              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
-            });
+          const date = normalizeDateValue(v);
+
+          // Google Sheets exports can return date headers as Date objects,
+          // Excel serial numbers, or plain text such as MM/DD/YYYY.
+          // Normalize all three forms so the Daily Effort records are not
+          // silently dropped when the sheet uses a different date format.
+          if (date) {
+            dateStarts.push({ c, date });
           }
         }
 
@@ -3235,174 +3032,6 @@ function SheetImport({ data, update, notify }) {
     };
 
     reader.readAsArrayBuffer(file);
-  }
-
-  async function parseDailyScreenshot(file) {
-    setScreenshotBusy(true);
-    setScreenshotFileName(file.name);
-    setScreenshotPreview([]);
-    setScreenshotText("");
-
-    try {
-      const Tesseract = await loadTesseract();
-      notify("Reading screenshot. Please wait...");
-
-      const result = await Tesseract.recognize(file, "eng", {
-        logger: message => {
-          if (message?.status === "recognizing text" && Number.isFinite(message.progress)) {
-            // Keep the UI responsive; the final notification is shown below.
-          }
-        }
-      });
-
-      const text = result?.data?.text || "";
-      const ocrLines = Array.isArray(result?.data?.lines)
-        ? result.data.lines.map(line => ({ text: line?.text || "", bbox: line?.bbox || null }))
-        : [];
-      setScreenshotText(text);
-
-      let detected = extractScreenshotDate(text);
-
-      // Daily screenshots are normally for the current operational year.
-      // OCR can easily read the final digit of 2026 as 2025/2028. When the
-      // detected month/day is within a short window of today, prefer the
-      // current year. This prevents a one-digit OCR error from shifting the
-      // entire day's data into the wrong year/date bucket.
-      if (detected?.date) {
-        const now = new Date();
-        const parts = detected.date.split("-").map(Number);
-        if (parts.length === 3 && parts.every(Number.isFinite)) {
-          const [yy, mm, dd] = parts;
-          const candidate = new Date(yy, mm - 1, dd);
-          const currentYearCandidate = new Date(now.getFullYear(), mm - 1, dd);
-          const diffDays = Math.abs(currentYearCandidate.getTime() - now.getTime()) / 86400000;
-          const detectedDiffDays = Math.abs(candidate.getTime() - now.getTime()) / 86400000;
-          if (diffDays <= 7 && detectedDiffDays > diffDays + 300) {
-            const pad = n => String(n).padStart(2, "0");
-            detected = { ...detected, date: `${now.getFullYear()}-${pad(mm)}-${pad(dd)}` };
-          }
-        }
-      }
-
-      if (!detected?.date) {
-        alert("Could not detect a date in this screenshot. Please use a clear screenshot containing the daily date.");
-        return;
-      }
-
-      const parsedRows = extractScreenshotRows(text, data.team, ocrLines);
-      if (!parsedRows.length) {
-        alert("The date was detected, but no team-member work rows could be detected. Please use a clear screenshot of the daily sheet.");
-        return;
-      }
-
-      const records = parsedRows.map((row, index) => ({
-        id: `screenshot-${detected.date}-${index}-${Date.now()}`,
-        date: detected.date,
-        name: row.name,
-        project: row.project,
-        type: row.type,
-        worked: Number(row.worked) || 0,
-        link: "",
-        source: "daily-screenshot"
-      }));
-
-      setScreenshotDate(detected.date);
-      setScreenshotPreview(records);
-
-      const shouldSave = window.confirm(
-        `Detected date ${detected.date} and ${records.length} team-member work records.\n\nClick OK to save these records to the online dashboard.`
-      );
-
-      if (!shouldSave) {
-        notify("Screenshot read successfully. Nothing was saved.");
-        return;
-      }
-
-      // Keep existing records from other dates and replace only the selected
-      // screenshot date. This prevents a daily screenshot from deleting history.
-      const existing = Array.isArray(data.sheetRecords) ? data.sheetRecords : [];
-      const nextRecords = [
-        ...existing.filter(row => normalizeDateValue(row.date) !== detected.date),
-        ...records
-      ];
-
-      const selectedDayRows = nextRecords.filter(row => normalizeDateValue(row.date) === detected.date);
-      const importedNames = [...new Set(selectedDayRows.map(row => String(row.name || "").trim()).filter(Boolean))];
-      const nextTeam = importedNames.map((name, index) => {
-        const personRows = selectedDayRows.filter(row => String(row.name || "").trim() === name);
-        const existingMember = data.team?.find(x => String(x.name || "").toLowerCase() === name.toLowerCase());
-        const completed = personRows.reduce((sum, row) => sum + (Number(row.worked) || 0), 0);
-        const reviewed = personRows
-          .filter(row => /review/i.test(String(row.type || "")))
-          .reduce((sum, row) => sum + (Number(row.worked) || 0), 0);
-        const projectNamesForMember = [...new Set(
-          personRows.map(row => getConfiguredProjectName(row.project)).filter(Boolean)
-        )];
-        const target = projectNamesForMember.reduce(
-          (sum, project) => sum + (Number(projectTargets[project]) || 0),
-          0
-        ) || Number(existingMember?.target) || completed;
-        const leave = personRows.some(row => /on leave/i.test(String(row.project || "")));
-        return {
-          id: existingMember?.id ?? (1000 + index),
-          name,
-          role: existingMember?.role || "Annotator",
-          target,
-          completed,
-          reviewed,
-          errors: Number(existingMember?.errors) || 0,
-          status: leave ? "Away" : (existingMember?.status === "Away" ? "Active" : (existingMember?.status || "Active"))
-        };
-      });
-
-      const nextProjects = Object.entries(
-        selectedDayRows.reduce((map, row) => {
-          const project = getConfiguredProjectName(row.project);
-          if (!project || ["Saturday", "Sunday", "On Leave"].includes(project)) return map;
-          if (!map[project]) map[project] = 0;
-          map[project] += Number(row.worked) || 0;
-          return map;
-        }, {})
-      ).map(([name, completed], index) => {
-        const existingProject = data.projects?.find(p => String(p.name).toLowerCase() === String(name).toLowerCase());
-        const target = Number(existingProject?.target ?? projectTargets[name] ?? completed) || completed;
-        const totalImages = Math.max(target, Number(existingProject?.totalImages ?? existingProject?.total ?? target) || target);
-        const safeCompleted = Math.min(totalImages, Math.max(0, completed));
-        const remaining = Math.max(0, totalImages - safeCompleted);
-        return {
-          id: 2000 + index,
-          name,
-          target,
-          totalImages,
-          total: totalImages,
-          completed: safeCompleted,
-          remaining,
-          status: getProjectStatus(totalImages, safeCompleted, remaining),
-          deadline: existingProject?.deadline || ""
-        };
-      });
-
-      const saved = await update({
-        ...data,
-        team: nextTeam.length ? nextTeam : data.team,
-        projects: nextProjects.length ? nextProjects : data.projects,
-        sheetRecords: nextRecords,
-        screenshotFile: file.name,
-        screenshotLastSync: new Date().toISOString(),
-        screenshotDetectedDate: detected.date,
-        screenshotImportCount: records.length
-      });
-
-      if (saved !== false) {
-        setPreview(records.slice(0, 25));
-        notify(`Saved ${records.length} screenshot records for ${detected.date}`);
-      }
-    } catch (err) {
-      console.error("Daily screenshot import failed", err);
-      alert(`Could not read this screenshot. ${err?.message || "Please use a clear PNG/JPG screenshot."}`);
-    } finally {
-      setScreenshotBusy(false);
-    }
   }
 
   function parseAccuracyWorkbook(file) {
@@ -3567,68 +3196,8 @@ function SheetImport({ data, update, notify }) {
   return (
     <Page
       title="Sheet Import"
-      subtitle="Import your Daily Effort Sheet, Accuracy Report, or a daily screenshot. All imported data updates the dashboard automatically."
+      subtitle="Import your Daily Effort Sheet and Accuracy Report. Both sources will update the dashboard automatically."
     >
-      <Panel title="Daily Screenshot Import">
-        <div className="import-box">
-          <Camera size={28} />
-          <h3>{screenshotBusy ? "Reading screenshot..." : "Upload today's screenshot"}</h3>
-          <p>
-            Upload a clear PNG/JPG screenshot of the daily Google Sheet. The dashboard will detect the date and team-member work values, then save them online.
-          </p>
-          <label className="primary upload-label">
-            <Camera size={17} />
-            Choose screenshot
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/jpg,image/webp"
-              hidden
-              disabled={screenshotBusy}
-              onChange={e => e.target.files?.[0] && parseDailyScreenshot(e.target.files[0])}
-            />
-          </label>
-
-          {(screenshotFileName || screenshotDate) && (
-            <div className="import-success">
-              <CheckCircle2 size={17} />
-              <span>
-                <b>{screenshotFileName || "Daily screenshot"}</b>
-                <small>
-                  Detected date: {screenshotDate || "—"}
-                  {data.screenshotLastSync ? ` • Saved: ${new Date(data.screenshotLastSync).toLocaleString()}` : ""}
-                </small>
-              </span>
-            </div>
-          )}
-        </div>
-      </Panel>
-
-      {screenshotPreview.length > 0 && (
-        <Panel title={`Screenshot preview — ${screenshotDate}`}>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Date</th><th>Name</th><th>Project</th><th>Type</th><th>Images worked</th></tr>
-              </thead>
-              <tbody>
-                {screenshotPreview.map((x, i) => (
-                  <tr key={x.id || i}>
-                    <td>{x.date}</td>
-                    <td><b>{x.name}</b></td>
-                    <td>{x.project}</td>
-                    <td>{x.type}</td>
-                    <td><b>{Number(x.worked || 0).toLocaleString()}</b></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="muted" style={{ marginTop: 12 }}>
-            The screenshot importer keeps records from other dates and replaces only the detected screenshot date.
-          </p>
-        </Panel>
-      )}
-
       <div className="grid two">
         <Panel title="Daily Effort Sheet">
           <div className="import-box">
