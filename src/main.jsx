@@ -2890,12 +2890,14 @@ function SheetImport({ data, update, notify }) {
 
         for (let c = 1; c < (rows[0]?.length || 0); c++) {
           const v = rows[0][c];
-          if (v instanceof Date) {
-            const pad = n => String(n).padStart(2, "0");
-            dateStarts.push({
-              c,
-              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
-            });
+          const date = normalizeDateValue(v);
+
+          // Google Sheets exports can return date headers as Date objects,
+          // Excel serial numbers, or plain text such as MM/DD/YYYY.
+          // Normalize all three forms so the Daily Effort records are not
+          // silently dropped when the sheet uses a different date format.
+          if (date) {
+            dateStarts.push({ c, date });
           }
         }
 
