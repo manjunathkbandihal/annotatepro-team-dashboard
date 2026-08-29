@@ -62,26 +62,10 @@ function getProjectStatus(total, completed, remaining) {
 }
 
 function getLocalDateKey(value = new Date()) {
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) return "";
-    const pad = n => String(n).padStart(2, "0");
-    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-  }
-
-  const text = String(value ?? "").trim();
-  if (!text) return "";
-
-  const iso = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
-  if (iso) {
-    const y = Number(iso[1]);
-    const m = Number(iso[2]);
-    const d = Number(iso[3]);
-    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-      return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    }
-  }
-
-  return "";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function normalizeSheetDate(value) {
@@ -92,12 +76,10 @@ function normalizeSheetDate(value) {
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
-    // Excel serial date. The 1899-12-30 epoch matches SheetJS/Excel behavior.
-    if (value >= 1 && value < 100000) {
+    // Excel serial date (SheetJS may return either a Date or a number).
+    if (value > 20000 && value < 80000) {
       const d = new Date(Date.UTC(1899, 11, 30) + value * 86400000);
-      if (!Number.isNaN(d.getTime())) {
-        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-      }
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
     }
     return "";
   }
@@ -105,44 +87,31 @@ function normalizeSheetDate(value) {
   const text = String(value).trim();
   if (!text) return "";
 
-  // ISO / yyyy-mm-dd / yyyy/mm/dd.
-  const iso = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})(?:\s|$)/);
+  // Preserve an ISO date exactly as written.
+  const iso = text.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
   if (iso) {
-    const y = Number(iso[1]);
-    const m = Number(iso[2]);
-    const d = Number(iso[3]);
-    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-      return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    }
+    return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
   }
 
-  // Google Sheets exports commonly use MM/DD/YYYY. If the first part is > 12,
-  // it can only be DD/MM/YYYY, so handle that form too.
-  const slash = text.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})(?:\s|$)/);
-  if (slash) {
-    const a = Number(slash[1]);
-    const b = Number(slash[2]);
-    const y = Number(slash[3]);
-
+  // Handle common Google Sheets date strings such as 12/08/2026 or 08/12/2026.
+  const parts = text.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
+  if (parts) {
+    const a = Number(parts[1]);
+    const b = Number(parts[2]);
+    const y = Number(parts[3]);
     let month = a;
     let day = b;
     if (a > 12 && b <= 12) {
       day = a;
       month = b;
     }
-
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
       return `${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
   }
 
-  // Month-name dates, e.g. Aug 28, 2026.
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) {
-    return getLocalDateKey(parsed);
-  }
-
-  return "";
+  return Number.isNaN(parsed.getTime()) ? "" : getLocalDateKey(parsed);
 }
 
 function getLatestWorkDate(records) {
@@ -156,23 +125,6 @@ function getLatestWorkDate(records) {
   ].sort();
 
   return dates[dates.length - 1] || "";
-}
-
-function getWorkDates(records) {
-  return [
-    ...new Set(
-      (Array.isArray(records) ? records : [])
-        .map(x => normalizeSheetDate(x?.date))
-        .filter(Boolean)
-    )
-  ].sort().reverse();
-}
-
-function getDailyRecords(records, selectedDate) {
-  const date = selectedDate || getLatestWorkDate(records);
-  return (Array.isArray(records) ? records : []).filter(
-    x => normalizeSheetDate(x?.date) === date
-  );
 }
 
 function getProjectStats(project) {
@@ -3040,112 +2992,136 @@ function Projects({
    QA
 ========================================================= */
 
-function QA({ data }) {
-  const team = Array.isArray(data?.team) ? data.team : [];
-  const issues = Array.isArray(data?.issues) ? data.issues : [];
-  const records = Array.isArray(data?.sheetRecords) ? data.sheetRecords : [];
-  const dates = getWorkDates(records);
-  const [selectedDate, setSelectedDate] = useState(() => getLatestWorkDate(records));
-
-  useEffect(() => {
-    const latest = getLatestWorkDate(records);
-    if (!selectedDate || (dates.length && !dates.includes(selectedDate))) {
-      setSelectedDate(latest || dates[0] || "");
-    }
-  }, [records, selectedDate, dates]);
-
-  const activeDate = selectedDate || getLatestWorkDate(records) || "";
-  const dailyRows = records.length
-    ? getDailyRecords(records, activeDate)
+function QA({
+  data
+}) {
+  const team = Array.isArray(data?.team)
+    ? data.team
     : [];
 
-  const reviewed = dailyRows.length
-    ? dailyRows
-        .filter(x => /review/i.test(String(x?.type || "")))
-        .reduce((s, x) => s + (Number(x?.worked) || 0), 0)
-    : team.reduce((s, x) => s + (Number(x?.reviewed) || 0), 0);
+  const issues = Array.isArray(data?.issues)
+    ? data.issues
+    : [];
 
-  const errors = dailyRows.length
-    ? dailyRows.reduce((s, x) => s + (Number(x?.errors) || 0), 0)
-    : team.reduce((s, x) => s + (Number(x?.errors) || 0), 0);
+  const reviewed = team.reduce(
+    (s, x) =>
+      s + (Number(x?.reviewed) || 0),
+    0
+  );
+
+  const errors = team.reduce(
+    (s, x) =>
+      s + (Number(x?.errors) || 0),
+    0
+  );
 
   const openIssues = issues.filter(
-    x => String(x?.status || "").toLowerCase() === "open"
+    x =>
+      String(x?.status || '').toLowerCase() ===
+      'open'
   ).length;
 
-  const qualityHealth = reviewed > 0
-    ? Math.max(0, Math.min(100, Math.round(((reviewed - errors) / reviewed) * 100)))
-    : 0;
+  /*
+     QA health is based on the current review/error data.
+     With no review data, do not display a fake percentage.
+  */
+  const qualityHealth =
+    reviewed > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              ((reviewed - errors) / reviewed) * 100
+            )
+          )
+        )
+      : 0;
 
-  const qualityLabel = reviewed === 0
-    ? "No review data"
-    : qualityHealth >= 95
-    ? "Excellent"
-    : qualityHealth >= 90
-    ? "Good"
-    : qualityHealth >= 80
-    ? "Needs attention"
-    : "Critical";
+  const qualityLabel =
+    reviewed === 0
+      ? 'No review data'
+      : qualityHealth >= 95
+      ? 'Excellent'
+      : qualityHealth >= 90
+      ? 'Good'
+      : qualityHealth >= 80
+      ? 'Needs attention'
+      : 'Critical';
 
   return (
     <Page
       title="QA & Reviews"
       subtitle="Keep annotation quality visible and actionable."
     >
-      {dates.length > 0 && (
-        <Panel title="Review date">
-          <label>
-            Select date
-            <select
-              value={activeDate}
-              onChange={e => setSelectedDate(e.target.value)}
-            >
-              {dates.map(date => (
-                <option key={date} value={date}>{date}</option>
-              ))}
-            </select>
-          </label>
-        </Panel>
-      )}
-
       <div className="cards">
         <Metric
           icon={ClipboardCheck}
           label="Total reviewed"
           value={reviewed.toLocaleString()}
-          note={activeDate ? `Review volume • ${activeDate}` : "Team review volume"}
-          trend={reviewed > 0 ? "Live" : "No data"}
+          note="Team review volume"
+          trend={reviewed > 0 ? 'Live' : 'No data'}
         />
+
         <Metric
           icon={CheckCircle2}
           label="Quality health"
-          value={reviewed > 0 ? `${qualityHealth}%` : "—"}
+          value={reviewed > 0 ? `${qualityHealth}%` : '—'}
           note={qualityLabel}
-          trend={reviewed === 0 ? "No data" : qualityHealth >= 95 ? "Excellent" : qualityHealth >= 90 ? "Good" : "Action"}
+          trend={
+            reviewed === 0
+              ? 'No data'
+              : qualityHealth >= 95
+              ? 'Excellent'
+              : qualityHealth >= 90
+              ? 'Good'
+              : 'Action'
+          }
         />
+
         <Metric
           icon={AlertTriangle}
           label="Total errors"
           value={errors.toLocaleString()}
-          note="Across current review data"
-          trend={errors > 0 ? "Monitor" : "Clear"}
+          note="Across active members"
+          trend={errors > 0 ? 'Monitor' : 'Clear'}
         />
       </div>
 
       <Panel title="Review readiness">
         <div className="qa-grid">
           <div>
-            <h2>{reviewed > 0 ? `${qualityHealth}%` : "—"}</h2>
-            <p className="muted">Overall quality health</p>
-            <Progress value={qualityHealth} />
+            <h2>
+              {reviewed > 0 ? `${qualityHealth}%` : '—'}
+            </h2>
+
+            <p className="muted">
+              Overall quality health
+            </p>
+
+            <Progress
+              value={qualityHealth}
+            />
           </div>
+
           <div>
-            <h2>{reviewed.toLocaleString()}</h2>
-            <p className="muted">Reviews completed</p>
+            <h2>
+              {reviewed.toLocaleString()}
+            </h2>
+
+            <p className="muted">
+              Reviews completed
+            </p>
           </div>
+
           <div>
-            <h2>{openIssues.toLocaleString()}</h2>
-            <p className="muted">Open QA issues</p>
+            <h2>
+              {openIssues.toLocaleString()}
+            </h2>
+
+            <p className="muted">
+              Open QA issues
+            </p>
           </div>
         </div>
       </Panel>
@@ -3305,69 +3281,113 @@ function Issues({
    ANALYTICS
 ========================================================= */
 
-function Analytics({ data }) {
-  const team = Array.isArray(data?.team) ? data.team : [];
-  const projects = Array.isArray(data?.projects) ? data.projects : [];
-  const issues = Array.isArray(data?.issues) ? data.issues : [];
-  const records = Array.isArray(data?.sheetRecords) ? data.sheetRecords : [];
-  const dates = getWorkDates(records);
-  const [selectedDate, setSelectedDate] = useState(() => getLatestWorkDate(records));
+function Analytics({
+  data
+}) {
+  const team = Array.isArray(data?.team)
+    ? data.team
+    : [];
 
-  useEffect(() => {
-    const latest = getLatestWorkDate(records);
-    if (!selectedDate || (dates.length && !dates.includes(selectedDate))) {
-      setSelectedDate(latest || dates[0] || "");
-    }
-  }, [records, selectedDate, dates]);
+  const projects = Array.isArray(data?.projects)
+    ? data.projects
+    : [];
 
-  const activeDate = selectedDate || getLatestWorkDate(records) || "";
-  const dailyRows = records.length ? getDailyRecords(records, activeDate) : [];
+  const issues = Array.isArray(data?.issues)
+    ? data.issues
+    : [];
 
-  const summaryTeam = records.length
-    ? [...new Set(dailyRows.map(x => String(x?.name || "").trim()).filter(Boolean))].map((name, i) => {
-        const person = dailyRows.filter(x => String(x?.name || "").trim() === name);
-        const completed = person.reduce((s, x) => s + (Number(x?.worked) || 0), 0);
-        const reviewed = person.filter(x => /review/i.test(String(x?.type || ""))).reduce((s, x) => s + (Number(x?.worked) || 0), 0);
-        const target = [...new Set(person.map(x => getConfiguredProjectName(x?.project)).filter(Boolean))]
-          .reduce((s, project) => s + (Number(projectTargets[project]) || 0), 0);
-        return { id: `daily-${i}-${name}`, name, completed, reviewed, target, errors: 0 };
-      })
-    : team;
+  const max = Math.max(
+    ...team.map(
+      x => Number(x?.completed) || 0
+    ),
+    1
+  );
 
-  const max = Math.max(...summaryTeam.map(x => Number(x?.completed) || 0), 1);
-  const totalCompleted = summaryTeam.reduce((s, x) => s + (Number(x?.completed) || 0), 0);
-  const totalTarget = summaryTeam.reduce((s, x) => s + (Number(x?.target) || 0), 0);
-  const totalReviewed = summaryTeam.reduce((s, x) => s + (Number(x?.reviewed) || 0), 0);
-  const totalErrors = summaryTeam.reduce((s, x) => s + (Number(x?.errors) || 0), 0);
-  const openIssues = issues.filter(x => String(x?.status || "").toLowerCase() === "open").length;
+  const totalCompleted = team.reduce(
+    (s, x) =>
+      s + (Number(x?.completed) || 0),
+    0
+  );
 
-  const capacity = totalTarget > 0
-    ? Math.min(100, Math.round((totalCompleted / totalTarget) * 100))
-    : 0;
+  const totalTarget = team.reduce(
+    (s, x) =>
+      s + (Number(x?.target) || 0),
+    0
+  );
 
-  const qualityHealth = totalReviewed > 0
-    ? Math.max(0, Math.min(100, Math.round(((totalReviewed - totalErrors) / totalReviewed) * 100)))
-    : 0;
+  const totalReviewed = team.reduce(
+    (s, x) =>
+      s + (Number(x?.reviewed) || 0),
+    0
+  );
 
-  const completedProjects = projects.filter(project => getProjectStats(project).status === "Completed").length;
+  const totalErrors = team.reduce(
+    (s, x) =>
+      s + (Number(x?.errors) || 0),
+    0
+  );
 
-  let healthTitle = "Healthy";
-  let healthText = "Most active work is progressing within target.";
+  const openIssues = issues.filter(
+    x =>
+      String(x?.status || '').toLowerCase() ===
+      'open'
+  ).length;
+
+  const capacity =
+    totalTarget > 0
+      ? Math.min(
+          100,
+          Math.round(
+            (totalCompleted / totalTarget) * 100
+          )
+        )
+      : 0;
+
+  const qualityHealth =
+    totalReviewed > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              ((totalReviewed - totalErrors) /
+                totalReviewed) * 100
+            )
+          )
+        )
+      : 0;
+
+  const completedProjects = projects.filter(
+    project =>
+      getProjectStats(project).status === 'Completed'
+  ).length;
+
+  let healthTitle = 'Healthy';
+  let healthText =
+    'Most active work is progressing within target.';
+
   if (openIssues > 0) {
-    healthTitle = "Needs attention";
-    healthText = `${openIssues.toLocaleString()} open ${openIssues === 1 ? "issue needs" : "issues need"} attention.`;
+    healthTitle = 'Needs attention';
+    healthText =
+      `${openIssues.toLocaleString()} open ${
+        openIssues === 1 ? 'issue needs' : 'issues need'
+      } attention.`;
   } else if (capacity >= 90) {
-    healthTitle = "Excellent";
-    healthText = "Team completion is at or above 90% of target.";
+    healthTitle = 'Excellent';
+    healthText =
+      'Team completion is at or above 90% of target.';
   } else if (capacity >= 70) {
-    healthTitle = "On track";
-    healthText = "Team productivity is progressing toward target.";
+    healthTitle = 'On track';
+    healthText =
+      'Team productivity is progressing toward target.';
   } else if (capacity > 0) {
-    healthTitle = "Behind target";
-    healthText = "Team completion is currently below the expected pace.";
+    healthTitle = 'Behind target';
+    healthText =
+      'Team completion is currently below the expected pace.';
   } else {
-    healthTitle = "No activity";
-    healthText = "No completed work has been recorded yet.";
+    healthTitle = 'No activity';
+    healthText =
+      'No completed work has been recorded yet.';
   }
 
   return (
@@ -3375,30 +3395,42 @@ function Analytics({ data }) {
       title="Analytics"
       subtitle="Understand productivity trends and team capacity."
     >
-      {dates.length > 0 && (
-        <Panel title="Analytics date">
-          <label>
-            Select date
-            <select value={activeDate} onChange={e => setSelectedDate(e.target.value)}>
-              {dates.map(date => <option key={date} value={date}>{date}</option>)}
-            </select>
-          </label>
-        </Panel>
-      )}
-
       <Panel title="Completed images by team member">
-        {summaryTeam.length === 0 ? (
-          <p className="muted">No team data available.</p>
+        {team.length === 0 ? (
+          <p className="muted">
+            No team data available.
+          </p>
         ) : (
           <div className="bars">
-            {summaryTeam.map((x, index) => {
-              const completed = Number(x?.completed) || 0;
-              const width = Math.max(0, Math.min(100, (completed / max) * 100));
+            {team.map(x => {
+              const completed =
+                Number(x?.completed) || 0;
+
+              const width = Math.max(
+                0,
+                Math.min(100, (completed / max) * 100)
+              );
+
               return (
-                <div className="bar-row" key={x?.id ?? x?.name ?? index}>
-                  <span>{x?.name || "Unnamed"}</span>
-                  <div><i style={{ width: `${width}%` }} /></div>
-                  <b>{completed.toLocaleString()}</b>
+                <div
+                  className="bar-row"
+                  key={x?.id ?? x?.name ?? Math.random()}
+                >
+                  <span>
+                    {x?.name || 'Unnamed'}
+                  </span>
+
+                  <div>
+                    <i
+                      style={{
+                        width: `${width}%`
+                      }}
+                    />
+                  </div>
+
+                  <b>
+                    {completed.toLocaleString()}
+                  </b>
                 </div>
               );
             })}
@@ -3408,24 +3440,62 @@ function Analytics({ data }) {
 
       <div className="grid two">
         <Panel title="Capacity">
-          <div className="big-number">{capacity}%</div>
-          <p className="muted">Team target utilization {activeDate ? `• ${activeDate}` : "today"}</p>
-          <Progress value={capacity} />
+          <div className="big-number">
+            {capacity}%
+          </div>
+
+          <p className="muted">
+            Team target utilization today
+          </p>
+
+          <Progress
+            value={capacity}
+          />
         </Panel>
+
         <Panel title="Review quality">
-          <div className="big-number">{totalReviewed > 0 ? `${qualityHealth}%` : "—"}</div>
-          <p className="muted">Based on current review and error data</p>
-          <Progress value={qualityHealth} />
+          <div className="big-number">
+            {totalReviewed > 0
+              ? `${qualityHealth}%`
+              : '—'}
+          </div>
+
+          <p className="muted">
+            Based on current review and error data
+          </p>
+
+          <Progress
+            value={qualityHealth}
+          />
         </Panel>
+
         <Panel title="Project completion">
-          <div className="big-number">{completedProjects}/{projects.length}</div>
-          <p className="muted">Projects completed</p>
+          <div className="big-number">
+            {completedProjects}/{projects.length}
+          </div>
+
+          <p className="muted">
+            Projects completed
+          </p>
         </Panel>
+
         <Panel title="Operational health">
           <div className="health">
-            {healthTitle === "Healthy" || healthTitle === "Excellent" || healthTitle === "On track" ? <CheckCircle2 /> : <AlertTriangle />}
-            <b>{healthTitle}</b>
-            <span>{healthText}</span>
+            {healthTitle === 'Healthy' ||
+            healthTitle === 'Excellent' ||
+            healthTitle === 'On track' ? (
+              <CheckCircle2 />
+            ) : (
+              <AlertTriangle />
+            )}
+
+            <b>
+              {healthTitle}
+            </b>
+
+            <span>
+              {healthText}
+            </span>
           </div>
         </Panel>
       </div>
@@ -3457,265 +3527,510 @@ function SheetImport({
     setBusy
   ] = useState(false);
 
-  function parseWorkbook(file) {
+  function parseWorkbook(
+    file
+  ) {
     setBusy(true);
-    setFileName(file?.name || "");
+    setFileName(
+      file.name
+    );
 
-    const reader = new FileReader();
+    const reader =
+      new FileReader();
 
-    reader.onerror = () => {
-      console.error("FileReader error while reading workbook", reader.error);
-      setBusy(false);
-      alert("Could not read the selected file. Please choose a valid Excel (.xlsx/.xls) or CSV file.");
-    };
+    reader.onload =
+      async e => {
+        try {
+          const wb =
+            XLSX.read(
+              e.target.result,
+              {
+                type: "array",
+                cellDates:
+                  true
+              }
+            );
 
-    reader.onload = async e => {
-      try {
-        const buffer = e.target?.result;
-        if (!buffer) {
-          throw new Error("The selected file could not be read.");
-        }
+          const ws =
+            wb.Sheets[
+              wb
+                .SheetNames[0]
+            ];
 
-        const wb = XLSX.read(buffer, {
-          type: "array",
-          cellDates: true,
-          raw: true,
-          dense: false
-        });
+          const rows =
+            XLSX.utils.sheet_to_json(
+              ws,
+              {
+                header: 1,
+                defval:
+                  null,
+                raw: true
+              }
+            );
 
-        if (!wb.SheetNames?.length) {
-          throw new Error("Workbook contains no sheets.");
-        }
+          const dateStarts = [];
 
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        if (!ws) {
-          throw new Error("The first worksheet could not be opened.");
-        }
-
-        const rows = XLSX.utils.sheet_to_json(ws, {
-          header: 1,
-          defval: null,
-          raw: true,
-          blankrows: false
-        });
-
-        if (!Array.isArray(rows) || rows.length === 0) {
-          throw new Error("The worksheet is empty.");
-        }
-
-        // Find the row containing the date headers. Do not assume it is always row 1;
-        // Google Sheets exports may contain a title/header row above the dates.
-        let dateHeaderRow = -1;
-        let dateStarts = [];
-        const scanRows = Math.min(rows.length, 12);
-
-        for (let r = 0; r < scanRows; r++) {
-          const row = Array.isArray(rows[r]) ? rows[r] : [];
-          const found = [];
-
-          for (let c = 1; c < row.length; c++) {
-            const date = normalizeSheetDate(row[c]);
-            if (date) found.push({ c, date });
+          for (let c = 1; c < (rows[0]?.length || 0); c++) {
+            const date = normalizeSheetDate(rows[0][c]);
+            if (date) {
+              dateStarts.push({ c, date });
+            }
           }
 
-          if (found.length > dateStarts.length) {
-            dateStarts = found;
-            dateHeaderRow = r;
-          }
-        }
+          const records =
+            [];
 
-        if (dateHeaderRow === -1 || dateStarts.length === 0) {
-          throw new Error("No date columns were detected in the worksheet.");
-        }
+          const names =
+            [];
 
-        // Names are normally in column A. Start after the date header row and ignore
-        // secondary column-label rows such as Project / Type / Total images worked.
-        const records = [];
-        const names = [];
-        const ignoredNames = new Set([
-          "name",
-          "member",
-          "team member",
-          "employee",
-          "employee name"
-        ]);
+          for (
+            let r = 2;
+            r <
+            rows.length;
+            r++
+          ) {
+            const name =
+              rows[r]?.[0];
 
-        for (let r = dateHeaderRow + 1; r < rows.length; r++) {
-          const nameValue = rows[r]?.[0];
-          if (nameValue == null || String(nameValue).trim() === "") continue;
+            if (!name)
+              continue;
 
-          const cleanName = String(nameValue).trim();
-          if (ignoredNames.has(cleanName.toLowerCase())) continue;
-
-          // Skip obvious secondary header rows.
-          if (/^(project|annotation\/?review|type|total images worked|images worked|link|link to the range)$/i.test(cleanName)) {
-            continue;
-          }
-
-          if (!names.includes(cleanName)) names.push(cleanName);
-
-          for (const d of dateStarts) {
-            const project = rows[r]?.[d.c];
-            const type = rows[r]?.[d.c + 1];
-            const worked = rows[r]?.[d.c + 2];
-            const link = rows[r]?.[d.c + 3];
+            const cleanName =
+              String(
+                name
+              ).trim();
 
             if (
-              project == null &&
-              type == null &&
-              worked == null &&
-              link == null
+              !names.includes(
+                cleanName
+              )
             ) {
-              continue;
+              names.push(
+                cleanName
+              );
             }
 
-            const ps = String(project ?? "").split(/\r?\n/);
-            const ts = String(type ?? "").split(/\r?\n/);
-            const nums = String(worked ?? "").split(/\r?\n/);
-            const ls = String(link ?? "").split(/\r?\n/);
+            for (
+              const d of dateStarts
+            ) {
+              const project =
+                rows[r]?.[
+                  d.c
+                ];
 
-            ps.forEach((p, i) => {
-              const text = p.trim();
-              if (!text) return;
+              const type =
+                rows[r]?.[
+                  d.c + 1
+                ];
 
-              const raw = nums[i] ?? nums[nums.length - 1] ?? "";
-              const numericText = String(raw)
-                .replace(/,/g, "")
-                .replace(/--|---/g, "")
-                .trim();
-              const n = Number(numericText) || 0;
+              const worked =
+                rows[r]?.[
+                  d.c + 2
+                ];
 
-              records.push({
-                id: `${d.date}-${cleanName}-${records.length}`,
-                date: d.date,
-                name: cleanName,
-                project: text,
-                type: String(ts[i] ?? ts[ts.length - 1] ?? "").trim(),
-                worked: n,
-                link: String(ls[i] ?? ls[ls.length - 1] ?? "").trim()
-              });
-            });
+              const link =
+                rows[r]?.[
+                  d.c + 3
+                ];
+
+              if (
+                project ==
+                  null &&
+                type ==
+                  null &&
+                worked ==
+                  null &&
+                link ==
+                  null
+              ) {
+                continue;
+              }
+
+              const ps =
+                String(
+                  project ??
+                    ""
+                ).split(
+                  "\n"
+                );
+
+              const ts =
+                String(
+                  type ??
+                    ""
+                ).split(
+                  "\n"
+                );
+
+              const nums =
+                String(
+                  worked ??
+                    ""
+                ).split(
+                  "\n"
+                );
+
+              const ls =
+                String(
+                  link ??
+                    ""
+                ).split(
+                  "\n"
+                );
+
+              ps.forEach(
+                (
+                  p,
+                  i
+                ) => {
+                  const text =
+                    p.trim();
+
+                  if (!text)
+                    return;
+
+                  const raw =
+                    nums[
+                      i
+                    ] ??
+                    nums[
+                      nums.length -
+                        1
+                    ] ??
+                    "";
+
+                  const n =
+                    Number(
+                      String(
+                        raw
+                      )
+                        .replace(
+                          /,/g,
+                          ""
+                        )
+                        .replace(
+                          /--|---/g,
+                          ""
+                        )
+                    ) || 0;
+
+                  records.push(
+                    {
+                      id: `${d.date}-${cleanName}-${records.length}`,
+                      date:
+                        normalizeSheetDate(d.date),
+                      name:
+                        cleanName,
+                      project:
+                        text,
+                      type:
+                        (
+                          ts[
+                            i
+                          ] ??
+                          ts[
+                            ts.length -
+                              1
+                          ] ??
+                          ""
+                        ).trim(),
+                      worked:
+                        n,
+                      link:
+                        (
+                          ls[
+                            i
+                          ] ??
+                          ls[
+                            ls.length -
+                              1
+                          ] ??
+                          ""
+                        ).trim()
+                    }
+                  );
+                }
+              );
+            }
           }
-        }
 
-        if (records.length === 0) {
-          throw new Error("No work records could be detected. Check the date row and Name column.");
-        }
+          // Use the latest imported date that is not in the future.
+          // This prevents an accidental future/header date (for example 2026-12-07)
+          // from replacing the actual current workday in Team / QA / Analytics.
+          const today = getLatestWorkDate(records) || getLocalDateKey();
 
-        const today = getLatestWorkDate(records) || getLocalDateKey();
-        const todayRows = records.filter(
-          x =>
-            x.date === today &&
-            !["Saturday", "Sunday", "On Leave"].includes(x.project)
-        );
+          const todayRows =
+            records.filter(
+              x =>
+                x.date ===
+                  today &&
+                ![
+                  "Saturday",
+                  "Sunday",
+                  "On Leave"
+                ].includes(
+                  x.project
+                )
+            );
 
-        const team = names.map((name, i) => {
-          const person = todayRows.filter(x => x.name === name);
-          const projectNames = [
-            ...new Set(
-              person
-                .map(x => getConfiguredProjectName(x.project))
-                .filter(Boolean)
+          const team =
+            names.map(
+              (
+                name,
+                i
+              ) => {
+                const person =
+                  todayRows.filter(
+                    x =>
+                      x.name ===
+                      name
+                  );
+
+                const projectNames =
+                  [
+                    ...new Set(
+                      person
+                        .map(
+                          x =>
+                            getConfiguredProjectName(
+                              x.project
+                            )
+                        )
+                        .filter(
+                          Boolean
+                        )
+                    )
+                  ];
+
+                const target =
+                  projectNames.reduce(
+                    (
+                      sum,
+                      project
+                    ) =>
+                      sum +
+                      (projectTargets[
+                        project
+                      ] ||
+                        0),
+                    0
+                  );
+
+                const completed =
+                  person.reduce(
+                    (
+                      s,
+                      x
+                    ) =>
+                      s +
+                      (Number(
+                        x.worked
+                      ) ||
+                        0),
+                    0
+                  );
+
+                const reviewed =
+                  person
+                    .filter(
+                      x =>
+                        /review/i.test(
+                          x.type
+                        )
+                    )
+                    .reduce(
+                      (
+                        s,
+                        x
+                      ) =>
+                        s +
+                        (Number(
+                          x.worked
+                        ) ||
+                          0),
+                      0
+                    );
+
+                const leave =
+                  records.some(
+                    x =>
+                      x.date ===
+                        today &&
+                      x.name ===
+                        name &&
+                      x.project ===
+                        "On Leave"
+                  );
+
+                return {
+                  id:
+                    1000 +
+                    i,
+                  name,
+                  role:
+                    "Annotator",
+                  target,
+                  completed,
+                  reviewed,
+                  errors: 0,
+                  status:
+                    leave
+                      ? "Away"
+                      : "Active"
+                };
+              }
+            );
+
+          const projectMap =
+            {};
+
+          Object.entries(
+            projectTargets
+          ).forEach(
+            ([
+              name,
+              target
+            ]) => {
+              projectMap[
+                name
+              ] = {
+                completed: 0,
+                target
+              };
+            }
+          );
+
+          todayRows.forEach(
+            x => {
+              const configuredName =
+                getConfiguredProjectName(
+                  x.project
+                );
+
+              if (
+                !configuredName
+              )
+                return;
+
+              if (
+                !projectMap[
+                  configuredName
+                ]
+              ) {
+                projectMap[
+                  configuredName
+                ] = {
+                  completed: 0,
+                  target:
+                    projectTargets[
+                      configuredName
+                    ] ||
+                    0
+                };
+              }
+
+              projectMap[
+                configuredName
+              ].completed +=
+                Number(
+                  x.worked
+                ) || 0;
+            }
+          );
+
+          const projects =
+            Object.entries(
+              projectMap
+            ).map(
+              (
+                [
+                  name,
+                  v
+                ],
+                i
+              ) => {
+                const target =
+                  Number(
+                    v.target
+                  ) || 0;
+
+                const completed =
+                  Math.max(
+                    0,
+                    Number(
+                      v.completed
+                    ) || 0
+                  );
+
+                const remaining =
+                  Math.max(
+                    0,
+                    target -
+                      completed
+                  );
+
+                return {
+                  id:
+                    2000 +
+                    i,
+                  name,
+                  target,
+                  total:
+                    target,
+                  completed,
+                  remaining,
+                  status:
+                    getProjectStatus(
+                      target,
+                      completed,
+                      remaining
+                    ),
+                  deadline:
+                    ""
+                };
+              }
+            );
+
+          await update({
+            ...data,
+            team,
+            projects,
+            sheetRecords:
+              records,
+            sheetFile:
+              file.name,
+            sheetLastSync:
+              new Date().toISOString()
+          });
+
+          setPreview(
+            records.slice(
+              0,
+              25
             )
-          ];
-
-          const target = projectNames.reduce(
-            (sum, project) => sum + (Number(projectTargets[project]) || 0),
-            0
           );
 
-          const completed = person.reduce(
-            (s, x) => s + (Number(x.worked) || 0),
-            0
+          notify(
+            `Imported ${records.length} work records`
+          );
+        } catch (err) {
+          console.error(
+            err
           );
 
-          const reviewed = person
-            .filter(x => /review/i.test(String(x.type || "")))
-            .reduce((s, x) => s + (Number(x.worked) || 0), 0);
-
-          const leave = records.some(
-            x =>
-              x.date === today &&
-              x.name === name &&
-              x.project === "On Leave"
+          alert(
+            "Could not read this Excel file. Please use .xlsx format."
           );
+        } finally {
+          setBusy(
+            false
+          );
+        }
+      };
 
-          return {
-            id: 1000 + i,
-            name,
-            role: "Annotator",
-            target,
-            completed,
-            reviewed,
-            errors: 0,
-            status: leave ? "Away" : "Active"
-          };
-        });
-
-        const projectMap = {};
-        Object.entries(projectTargets).forEach(([name, target]) => {
-          projectMap[name] = {
-            completed: 0,
-            target: Number(target) || 0
-          };
-        });
-
-        todayRows.forEach(x => {
-          const configuredName = getConfiguredProjectName(x.project);
-          if (!configuredName) return;
-
-          if (!projectMap[configuredName]) {
-            projectMap[configuredName] = {
-              completed: 0,
-              target: Number(projectTargets[configuredName]) || 0
-            };
-          }
-
-          projectMap[configuredName].completed += Number(x.worked) || 0;
-        });
-
-        const projects = Object.entries(projectMap).map(([name, v], i) => {
-          const target = Number(v.target) || 0;
-          const completed = Math.max(0, Number(v.completed) || 0);
-          const remaining = Math.max(0, target - completed);
-
-          return {
-            id: 2000 + i,
-            name,
-            target,
-            total: target,
-            completed,
-            remaining,
-            status: getProjectStatus(target, completed, remaining),
-            deadline: ""
-          };
-        });
-
-        await update({
-          ...data,
-          team,
-          projects,
-          sheetRecords: records,
-          sheetFile: file.name,
-          sheetLastSync: new Date().toISOString()
-        });
-
-        setPreview(records.slice(0, 25));
-        notify(`Imported ${records.length} work records`);
-      } catch (err) {
-        console.error("Workbook import failed:", err);
-        alert(
-          `Could not read this Excel file. ${
-            err?.message ||
-            "Please use a valid .xlsx/.xls or CSV file and check the sheet structure."
-          }`
-        );
-      } finally {
-        setBusy(false);
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
+    reader.readAsArrayBuffer(
+      file
+    );
   }
 
   return (
@@ -3737,7 +4052,10 @@ function SheetImport({
             </h3>
 
             <p>
-              Use Google Sheets → File → Download → Microsoft Excel (.xlsx) or CSV.
+              Use Google Sheets →
+              File → Download →
+              Microsoft Excel
+              (.xlsx).
             </p>
 
             <label className="primary upload-label">
@@ -3749,7 +4067,7 @@ function SheetImport({
 
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx,.xls"
                 hidden
                 onChange={e =>
                   e.target.files?.[0] &&
@@ -4352,42 +4670,6 @@ function Modal({
   );
 }
 
-class AppErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, message: "" };
-  }
-
-  static getDerivedStateFromError(error) {
-    return {
-      hasError: true,
-      message: error?.message || "Unexpected dashboard error."
-    };
-  }
-
-  componentDidCatch(error, info) {
-    console.error("Dashboard render error:", error, info);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="app">
-          <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
-            <div className="panel" style={{ maxWidth: "720px", width: "100%" }}>
-              <h2>Dashboard section could not be displayed</h2>
-              <p className="muted">The dashboard caught a rendering error instead of showing a blank white screen.</p>
-              <p><b>Error:</b> {this.state.message}</p>
-              <button className="primary" onClick={() => window.location.reload()}>Reload dashboard</button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 /* =========================================================
    START APP
 ========================================================= */
@@ -4397,7 +4679,5 @@ createRoot(
     "root"
   )
 ).render(
-  <AppErrorBoundary>
-    <App />
-  </AppErrorBoundary>
-); 
+  <App />
+);
