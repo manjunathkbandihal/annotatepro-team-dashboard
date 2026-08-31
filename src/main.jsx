@@ -2945,16 +2945,18 @@ function SheetImport({ data, update, notify }) {
 
         const dateStarts = [];
 
-        for (let c = 1; c < (rows[0]?.length || 0); c++) {
-          const v = rows[0][c];
-          if (v instanceof Date) {
-            const pad = n => String(n).padStart(2, "0");
-            dateStarts.push({
-              c,
-              date: `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`
-            });
-          }
-        }
+for (let c = 1; c < (rows[0]?.length || 0); c++) {
+  const v = rows[0][c];
+
+  const date = normalizeDateValue(v);
+
+  if (date) {
+    dateStarts.push({
+      c,
+      date
+    });
+  }
+}
 
         const records = [];
         const names = [];
