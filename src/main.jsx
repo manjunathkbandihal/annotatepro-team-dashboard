@@ -3089,6 +3089,19 @@ console.log(
     date: x.date
   }))
 );
+        console.log("========== DATE DEBUG ==========");
+
+dateStarts.forEach(d => {
+  console.log(
+    `DATE: ${d.date}`,
+    `COLUMN: ${d.c}`,
+    `ROW0: ${rows[0]?.[d.c]}`,
+    `ROW1: ${rows[1]?.[d.c]}`,
+    `ROW2: ${rows[2]?.[d.c]}`
+  );
+});
+
+console.log("================================");
 
 console.log("DATE STARTS:", dateStarts);
 
