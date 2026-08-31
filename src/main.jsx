@@ -3098,6 +3098,15 @@ for (let c = 1; c < (rows[0]?.length || 0); c++) {
             const worked = rows[r]?.[d.c + 2];
             const link = rows[r]?.[d.c + 3];
 
+            console.log("IMPORT CHECK:", {
+  date: d.date,
+  name: cleanName,
+  project,
+  type,
+  worked,
+  link
+});
+
             if (project == null && type == null && worked == null && link == null) continue;
 
             const ps = String(project ?? "").split("\n");
