@@ -1433,6 +1433,7 @@ function DashboardApp({ session, profile, onSignOut }) {
           )}
 
           {page === "analytics" && <Analytics data={data} />}
+          {page === "reports" && <Reports data={data} />}
 
           {page === "settings" && (
             <SettingsPage
