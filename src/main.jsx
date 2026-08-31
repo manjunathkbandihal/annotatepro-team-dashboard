@@ -1081,6 +1081,7 @@ function DashboardApp({ session, profile, onSignOut }) {
     ["qa", "QA & Reviews", ClipboardCheck],
     ["issues", "Issues", AlertTriangle],
     ["analytics", "Analytics", BarChart3],
+    ["reports", "Reports", FileText],
     ["settings", "Settings", Settings],
     ["sheet", "Sheet Import", Upload]
   ];
