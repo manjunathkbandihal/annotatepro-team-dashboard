@@ -79,11 +79,12 @@ function getProjectStats(project) {
 const seed = {
   team: [
     { id: 1, name: "Manjunath", role: "Team Lead", target: 1000, completed: 862, reviewed: 540, errors: 12, status: "Active" },
-    { id: 2, name: "Rahul", role: "Annotator", target: 1000, completed: 918, reviewed: 420, errors: 18, status: "Active" },
-    { id: 3, name: "Priya", role: "Annotator", target: 1000, completed: 744, reviewed: 390, errors: 9, status: "Active" },
-    { id: 4, name: "Arun", role: "Reviewer", target: 400, completed: 372, reviewed: 372, errors: 7, status: "Active" },
-    { id: 5, name: "Sneha", role: "Annotator", target: 1000, completed: 1000, reviewed: 610, errors: 6, status: "Active" },
-    { id: 6, name: "Kiran", role: "Annotator", target: 1000, completed: 581, reviewed: 240, errors: 21, status: "Away" }
+    { id: 2, name: "Nandini Keni", role: "Annotator", target: 1000, completed: 918, reviewed: 420, errors: 18, status: "Active" },
+    { id: 3, name: "Shantha Mantri", role: "Annotator", target: 1000, completed: 744, reviewed: 390, errors: 9, status: "Active" },
+    { id: 4, name: "Shweta Kannagar", role: "Reviewer", target: 400, completed: 372, reviewed: 372, errors: 7, status: "Active" },
+    { id: 5, name: "Kishore Devaragudi", role: "Annotator", target: 1000, completed: 1000, reviewed: 610, errors: 6, status: "Active" },
+    { id: 6, name: "K Ganesh", role: "Annotator", target: 1000, completed: 581, reviewed: 240, errors: 21, status: "Away" }
+    { id: 7, name: "Kiran Y", role: "Annotator", target: 1000, completed: 918, reviewed: 420, errors: 18, status: "Active" },
   ],
 
   projects: [
