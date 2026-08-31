@@ -84,9 +84,6 @@ const seed = {
     { id: 4, name: "Shweta Kannagar", role: "Reviewer", target: 400, completed: 372, reviewed: 372, errors: 7, status: "Active" },
     { id: 5, name: "Kishore Devaragudi", role: "Annotator", target: 1000, completed: 1000, reviewed: 610, errors: 6, status: "Active" },
     { id: 6, name: "K Ganesh", role: "Annotator", target: 1000, completed: 581, reviewed: 240, errors: 21, status: "Away" }
-    { id: 7, name: "Kiran Y", role: "Annotator", target: 1000, completed: 918, reviewed: 420, errors: 18, status: "Active" },
-    { id: 8, name: "Vishwas Reddy N", role: "Annotator", target: 1000, completed: 918, reviewed: 420, errors: 18, status: "Active" },
-    { id: 9, name: "HR Sunil Kumar", role: "Annotator", target: 1000, completed: 918, reviewed: 420, errors: 18, status: "Active" },
   ],
 
   projects: [
