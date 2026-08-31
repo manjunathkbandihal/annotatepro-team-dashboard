@@ -85,6 +85,7 @@ const seed = {
     { id: 5, name: "Sneha", role: "Annotator", target: 1000, completed: 1000, reviewed: 610, errors: 6, status: "Active" },
     { id: 6, name: "Kiran", role: "Annotator", target: 1000, completed: 581, reviewed: 240, errors: 21, status: "Away" }
   ],
+
   projects: [
     { id: 1, name: "momah_phase2_april", target: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
     { id: 2, name: "MBS_Street_Detections_Phase2", target: 1000, total: 1000, completed: 0, remaining: 1000, status: "Pending", deadline: "" },
@@ -92,6 +93,7 @@ const seed = {
     { id: 4, name: "combined_aug_data_1", target: 800, total: 800, completed: 0, remaining: 800, status: "Pending", deadline: "" },
     { id: 5, name: "iltwy_73026_53front_1", target: 350, total: 350, completed: 0, remaining: 350, status: "Pending", deadline: "" }
   ],
+
   issues: [
     { id: 1, type: "Missed labels", project: "PCI_Annotations", owner: "Priya", severity: "High", status: "Open", date: "2026-08-11" },
     { id: 2, type: "Wrong prediction", project: "hase2_july_data_1", owner: "Kiran", severity: "Medium", status: "Open", date: "2026-08-11" },
@@ -99,25 +101,53 @@ const seed = {
   ]
 };
 
+
+/* =========================================================
+   LOCAL STORAGE
+========================================================= */
+
 function loadData() {
   try {
     const saved = JSON.parse(localStorage.getItem("annotatepro-data"));
+
     if (!saved) return seed;
 
     return {
       ...seed,
+
       ...saved,
-      team: Array.isArray(saved.team) ? saved.team : seed.team,
+
+      team: Array.isArray(saved.team)
+        ? saved.team
+        : seed.team,
+
       projects: Array.isArray(saved.projects)
         ? saved.projects.map(p => {
             const s = getProjectStats(p);
-            return { ...p, ...s, target: s.total, total: s.total };
+
+            return {
+              ...p,
+              ...s,
+              target: s.total,
+              total: s.total
+            };
           })
         : seed.projects,
-      issues: Array.isArray(saved.issues) ? saved.issues : seed.issues,
-      sheetRecords: Array.isArray(saved.sheetRecords) ? saved.sheetRecords : [],
-      accuracyRecords: Array.isArray(saved.accuracyRecords) ? saved.accuracyRecords : [],
+
+      issues: Array.isArray(saved.issues)
+        ? saved.issues
+        : seed.issues,
+
+      sheetRecords: Array.isArray(saved.sheetRecords)
+        ? saved.sheetRecords
+        : [],
+
+      accuracyRecords: Array.isArray(saved.accuracyRecords)
+        ? saved.accuracyRecords
+        : [],
+
       accuracyFile: saved.accuracyFile || "",
+
       accuracyLastSync: saved.accuracyLastSync || ""
     };
   } catch {
@@ -125,32 +155,82 @@ function loadData() {
   }
 }
 
+
 function saveData(data) {
-  localStorage.setItem("annotatepro-data", JSON.stringify(data));
+  localStorage.setItem(
+    "annotatepro-data",
+    JSON.stringify(data)
+  );
 }
+
+
+/* =========================================================
+   PROJECT NAME
+========================================================= */
 
 function getConfiguredProjectName(project) {
   const clean = String(project || "").trim();
+
   const found = Object.keys(projectTargets).find(
     name => name.toLowerCase() === clean.toLowerCase()
   );
+
   return found || clean;
 }
+
+
+/* =========================================================
+   DATE HELPERS
+   IMPORTANT:
+   All dates are treated as CALENDAR DATES.
+   No timezone conversion is used.
+========================================================= */
 
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
 
+
+/*
+  Creates a validated YYYY-MM-DD date string.
+
+  Example:
+  toISODate(2026, 8, 28)
+  => "2026-08-28"
+*/
 function toISODate(year, month, day) {
   const y = Number(year);
   const m = Number(month);
   const d = Number(day);
 
-  if (!y || !m || !d) return "";
+  if (
+    !Number.isInteger(y) ||
+    !Number.isInteger(m) ||
+    !Number.isInteger(d)
+  ) {
+    return "";
+  }
 
+  if (
+    y < 1900 ||
+    m < 1 ||
+    m > 12 ||
+    d < 1 ||
+    d > 31
+  ) {
+    return "";
+  }
+
+  /*
+    IMPORTANT:
+    Use LOCAL date construction only for validation.
+    We never call toISOString() here.
+  */
   const date = new Date(y, m - 1, d);
 
-  if (Number.isNaN(date.getTime())) return "";
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
 
   if (
     date.getFullYear() !== y ||
@@ -163,11 +243,97 @@ function toISODate(year, month, day) {
   return `${y}-${pad2(m)}-${pad2(d)}`;
 }
 
-function normalizeDateValue(value) {
-  if (value == null || value === "") return "";
 
-  // Excel / Google Sheets date returned as a JavaScript Date
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+/*
+  Converts a YYYY-MM-DD calendar date into a LOCAL Date object.
+
+  DO NOT use:
+      new Date("2026-08-28")
+
+  for calendar calculations.
+
+  This function prevents timezone-related weekday errors.
+*/
+function dateKeyToLocalDate(dateKey) {
+  const match = String(dateKey || "")
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  const date = new Date(
+    year,
+    month - 1,
+    day
+  );
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+
+/*
+  Returns weekday number safely.
+
+  Sunday = 0
+  Monday = 1
+  Tuesday = 2
+  Wednesday = 3
+  Thursday = 4
+  Friday = 5
+  Saturday = 6
+
+  Example:
+  getCalendarDay("2026-07-31") => 5 (Friday)
+  getCalendarDay("2026-08-01") => 6 (Saturday)
+*/
+function getCalendarDay(dateValue) {
+  const normalized = normalizeDateValue(dateValue);
+
+  if (!normalized) return null;
+
+  const date = dateKeyToLocalDate(normalized);
+
+  if (!date) return null;
+
+  return date.getDay();
+}
+
+
+/* =========================================================
+   DATE NORMALIZATION
+========================================================= */
+
+function normalizeDateValue(value) {
+  if (value == null || value === "") {
+    return "";
+  }
+
+
+  /*
+    CASE 1:
+    JavaScript Date object.
+
+    IMPORTANT:
+    Read the LOCAL calendar components directly.
+    Do NOT use toISOString().
+  */
+  if (
+    value instanceof Date &&
+    !Number.isNaN(value.getTime())
+  ) {
     return toISODate(
       value.getFullYear(),
       value.getMonth() + 1,
@@ -175,206 +341,509 @@ function normalizeDateValue(value) {
     );
   }
 
-  // Excel serial date
+
+  /*
+    CASE 2:
+    Excel serial date.
+
+    Example:
+    46262 -> calendar date
+
+    Use UTC only for the Excel serial calculation,
+    then extract UTC components.
+  */
   if (
     typeof value === "number" &&
     Number.isFinite(value) &&
     value > 20000 &&
     value < 80000
   ) {
-    const excelEpoch = new Date(1899, 11, 30);
+    const excelEpoch = Date.UTC(
+      1899,
+      11,
+      30
+    );
+
+    const milliseconds =
+      Math.round(value * 86400000);
 
     const d = new Date(
-      excelEpoch.getTime() + Math.round(value * 86400000)
+      excelEpoch + milliseconds
     );
 
     return toISODate(
-      d.getFullYear(),
-      d.getMonth() + 1,
-      d.getDate()
+      d.getUTCFullYear(),
+      d.getUTCMonth() + 1,
+      d.getUTCDate()
     );
   }
 
+
   const text = String(value).trim();
 
-  // YYYY-MM-DD / YYYY/MM/DD / YYYY.MM.DD
+  if (!text) {
+    return "";
+  }
+
+
+  /*
+    CASE 3:
+    YYYY-MM-DD
+    YYYY/MM/DD
+    YYYY.MM.DD
+  */
   let m = text.match(
-    /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/
+    /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/
   );
 
   if (m) {
-    return toISODate(m[1], m[2], m[3]);
+    return toISODate(
+      m[1],
+      m[2],
+      m[3]
+    );
   }
 
-  // DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY
+
+  /*
+    CASE 4:
+    DD-MM-YYYY
+    DD/MM/YYYY
+    DD.MM.YYYY
+
+    This is important for your Google Sheet format:
+
+    28/08/2026
+    => 2026-08-28
+  */
   m = text.match(
-    /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/
+    /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/
   );
 
   if (m) {
-    return toISODate(m[3], m[2], m[1]);
+    return toISODate(
+      m[3],
+      m[2],
+      m[1]
+    );
   }
 
-  // Do NOT use new Date("YYYY-MM-DD") blindly.
-  // If the value is an ISO date string, extract the calendar date directly.
-  m = text.match(/^(\d{4})[-](\d{1,2})[-](\d{1,2})$/);
+
+  /*
+    CASE 5:
+    Sometimes imported dates contain a time.
+
+    Example:
+    2026-08-28T00:00:00
+    2026-08-28T00:00:00.000
+  */
+  m = text.match(
+    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:T|\s)/
+  );
 
   if (m) {
-    return toISODate(m[1], m[2], m[3]);
+    return toISODate(
+      m[1],
+      m[2],
+      m[3]
+    );
   }
+
+
+  /*
+    CASE 6:
+    DD/MM/YYYY with time.
+  */
+  m = text.match(
+    /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:T|\s)/
+  );
+
+  if (m) {
+    return toISODate(
+      m[3],
+      m[2],
+      m[1]
+    );
+  }
+
+
+  /*
+    IMPORTANT:
+    Do NOT fall back to:
+        new Date(text)
+
+    because browser timezone/date parsing can change
+    the calendar day.
+
+    Unknown date formats are rejected instead.
+  */
 
   return "";
 }
 
+
+/* =========================================================
+   DATE RANGE
+========================================================= */
+
 function getDateRange(filter) {
   if (!filter) {
-    return { start: "", end: "", label: "Select a date" };
+    return {
+      start: "",
+      end: "",
+      label: "Select a date"
+    };
   }
 
-  const start = filter.start || "";
-  const end = filter.mode === "range" ? (filter.end || "") : start;
+  const start = normalizeDateValue(
+    filter.start || ""
+  );
+
+  const end =
+    filter.mode === "range"
+      ? normalizeDateValue(filter.end || "")
+      : start;
 
   if (!start) {
-    return { start: "", end: "", label: filter.mode === "range" ? "Select a date range" : "Select a date" };
+    return {
+      start: "",
+      end: "",
+      label:
+        filter.mode === "range"
+          ? "Select a date range"
+          : "Select a date"
+    };
   }
 
-  if (filter.mode === "range" && !end) {
-    return { start, end: "", label: `${start} → Select end date` };
+  if (
+    filter.mode === "range" &&
+    !end
+  ) {
+    return {
+      start,
+      end: "",
+      label: `${start} → Select end date`
+    };
   }
 
-  if (filter.mode === "range" && end < start) {
-    return { start: end, end: start, label: `${end} → ${start}` };
+  if (
+    filter.mode === "range" &&
+    end < start
+  ) {
+    return {
+      start: end,
+      end: start,
+      label: `${end} → ${start}`
+    };
   }
 
   return {
     start,
     end,
-    label: start === end ? start : `${start} → ${end}`
+    label:
+      start === end
+        ? start
+        : `${start} → ${end}`
   };
 }
 
-function isDateInRange(date, range) {
-  if (!range.start || !range.end || !date) return false;
 
-  // Always compare normalized YYYY-MM-DD values. This prevents
-  // stored ISO timestamps (e.g. 2026-08-12T00:00:00.000Z) or
-  // Excel/text date formats from being excluded accidentally.
-  const normalized = normalizeDateValue(date);
-  return normalized >= range.start && normalized <= range.end;
+/* =========================================================
+   DATE RANGE CHECK
+========================================================= */
+
+function isDateInRange(date, range) {
+  if (
+    !range?.start ||
+    !range?.end ||
+    !date
+  ) {
+    return false;
+  }
+
+  const normalized =
+    normalizeDateValue(date);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized >= range.start &&
+    normalized <= range.end
+  );
 }
+
+
+/* =========================================================
+   LATEST IMPORTED DATE
+========================================================= */
 
 function getLatestImportedDate(data) {
   const dates = [
-    ...(Array.isArray(data?.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
-    ...(Array.isArray(data?.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(Boolean).sort();
+    ...(Array.isArray(data?.sheetRecords)
+      ? data.sheetRecords.map(x =>
+          normalizeDateValue(x.date)
+        )
+      : []),
 
-  return dates.length ? dates[dates.length - 1] : "";
+    ...(Array.isArray(data?.accuracyRecords)
+      ? data.accuracyRecords.map(x =>
+          normalizeDateValue(x.date)
+        )
+      : [])
+  ]
+    .filter(Boolean)
+    .sort();
+
+  return dates.length
+    ? dates[dates.length - 1]
+    : "";
 }
 
-function DateFilter({ value, onChange, data }) {
-  const allDates = [
-    ...(Array.isArray(data.sheetRecords) ? data.sheetRecords.map(x => normalizeDateValue(x.date)) : []),
-    ...(Array.isArray(data.accuracyRecords) ? data.accuracyRecords.map(x => normalizeDateValue(x.date)) : [])
-  ].filter(Boolean).sort();
 
-  const firstDate = allDates[0] || "";
-  const lastDate = allDates[allDates.length - 1] || "";
-  const mode = value?.mode || "single";
+/* =========================================================
+   DATE FILTER
+========================================================= */
+
+function DateFilter({
+  value,
+  onChange,
+  data
+}) {
+  const allDates = [
+    ...(Array.isArray(data?.sheetRecords)
+      ? data.sheetRecords.map(x =>
+          normalizeDateValue(x.date)
+        )
+      : []),
+
+    ...(Array.isArray(data?.accuracyRecords)
+      ? data.accuracyRecords.map(x =>
+          normalizeDateValue(x.date)
+        )
+      : [])
+  ]
+    .filter(Boolean)
+    .sort();
+
+  const firstDate =
+    allDates[0] || "";
+
+  const lastDate =
+    allDates[allDates.length - 1] || "";
+
+  const mode =
+    value?.mode || "single";
+
 
   const updateFilter = patch => {
-    const next = { ...value, ...patch };
+    const next = {
+      ...value,
+      ...patch
+    };
 
     if (next.mode === "single") {
-      next.end = next.start || "";
+      next.start =
+        normalizeDateValue(next.start || "");
+
+      next.end =
+        next.start || "";
+    } else {
+      next.start =
+        normalizeDateValue(next.start || "");
+
+      next.end =
+        normalizeDateValue(next.end || "");
     }
 
     onChange(next);
   };
 
+
   const switchMode = nextMode => {
     if (nextMode === "range") {
       onChange({
         mode: "range",
-        start: value?.start || firstDate,
-        end: value?.end || lastDate || value?.start || firstDate
+
+        start:
+          normalizeDateValue(
+            value?.start || firstDate
+          ),
+
+        end:
+          normalizeDateValue(
+            value?.end ||
+            lastDate ||
+            value?.start ||
+            firstDate
+          )
       });
     } else {
+      const singleDate =
+        normalizeDateValue(
+          value?.start ||
+          lastDate
+        );
+
       onChange({
         mode: "single",
-        start: value?.start || lastDate,
-        end: value?.start || lastDate
+        start: singleDate,
+        end: singleDate
       });
     }
   };
 
+
   return (
     <div className="date-filter">
+
       <div className="date-filter-info">
         <b>Report date</b>
+
         <small>
           {mode === "range"
-            ? (value?.start && value?.end
-                ? `${value.start} → ${value.end}`
-                : "Select a start and end date")
-            : (value?.start || "Select a date")}
+            ? (
+                value?.start &&
+                value?.end
+                  ? `${value.start} → ${value.end}`
+                  : "Select a start and end date"
+              )
+            : (
+                value?.start ||
+                "Select a date"
+              )}
         </small>
       </div>
 
+
       <div className="date-filter-controls">
+
         <div className="date-filter-mode">
+
           <button
             type="button"
-            className={mode === "single" ? "active" : ""}
-            onClick={() => switchMode("single")}
+            className={
+              mode === "single"
+                ? "active"
+                : ""
+            }
+            onClick={() =>
+              switchMode("single")
+            }
           >
             Single date
           </button>
+
+
           <button
             type="button"
-            className={mode === "range" ? "active" : ""}
-            onClick={() => switchMode("range")}
+            className={
+              mode === "range"
+                ? "active"
+                : ""
+            }
+            onClick={() =>
+              switchMode("range")
+            }
           >
             From → To
           </button>
+
         </div>
 
+
         {mode === "single" ? (
+
           <input
             type="date"
-            value={value?.start || ""}
-            min={firstDate || undefined}
-            max={lastDate || undefined}
-            onChange={e => updateFilter({ start: e.target.value })}
+            value={
+              normalizeDateValue(
+                value?.start || ""
+              )
+            }
+            min={
+              firstDate || undefined
+            }
+            max={
+              lastDate || undefined
+            }
+            onChange={e =>
+              updateFilter({
+                start: e.target.value
+              })
+            }
             aria-label="Select report date"
           />
+
         ) : (
+
           <div className="date-range-inputs">
+
             <label>
               <span>From</span>
+
               <input
                 type="date"
-                value={value?.start || ""}
-                min={firstDate || undefined}
-                max={value?.end || lastDate || undefined}
-                onChange={e => updateFilter({ start: e.target.value })}
+                value={
+                  normalizeDateValue(
+                    value?.start || ""
+                  )
+                }
+                min={
+                  firstDate || undefined
+                }
+                max={
+                  value?.end ||
+                  lastDate ||
+                  undefined
+                }
+                onChange={e =>
+                  updateFilter({
+                    start: e.target.value
+                  })
+                }
                 aria-label="Report start date"
               />
             </label>
-            <span className="date-range-arrow">→</span>
+
+
+            <span className="date-range-arrow">
+              →
+            </span>
+
+
             <label>
               <span>To</span>
+
               <input
                 type="date"
-                value={value?.end || ""}
-                min={value?.start || firstDate || undefined}
-                max={lastDate || undefined}
-                onChange={e => updateFilter({ end: e.target.value })}
+                value={
+                  normalizeDateValue(
+                    value?.end || ""
+                  )
+                }
+                min={
+                  value?.start ||
+                  firstDate ||
+                  undefined
+                }
+                max={
+                  lastDate || undefined
+                }
+                onChange={e =>
+                  updateFilter({
+                    end: e.target.value
+                  })
+                }
                 aria-label="Report end date"
               />
             </label>
+
           </div>
+
         )}
+
       </div>
     </div>
   );
