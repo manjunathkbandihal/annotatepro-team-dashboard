@@ -2751,31 +2751,67 @@ function Issues({ rows, remove, openAdd, canManage }) {
 ========================================================= */
 function Analytics({ data }) {
   const latestDate = getLatestImportedDate(data);
+
   const [period, setPeriod] = useState(() => ({
     mode: "single",
     start: latestDate,
     end: latestDate
   }));
+
   const range = getDateRange(period);
 
+  /*
+    IMPORTANT:
+    Always normalize imported Daily Effort dates before
+    comparing them with the selected dashboard date.
+    This prevents timezone/date-format shifts.
+  */
+  const normalizedStart = normalizeDateValue(range.start);
+  const normalizedEnd = normalizeDateValue(range.end);
+
+  const normalizedRange = {
+    ...range,
+    start: normalizedStart,
+    end: normalizedEnd
+  };
+
   const sheetRows = Array.isArray(data.sheetRecords)
-    ? data.sheetRecords.filter(x => isDateInRange(x.date, range))
+    ? data.sheetRecords.filter(x => {
+        const recordDate = normalizeDateValue(x.date);
+
+        if (!recordDate || !normalizedRange.start || !normalizedRange.end) {
+          return false;
+        }
+
+        return (
+          recordDate >= normalizedRange.start &&
+          recordDate <= normalizedRange.end
+        );
+      })
     : [];
 
   const accuracyRows = Array.isArray(data.accuracyRecords)
-    ? data.accuracyRecords.filter(x => isDateInRange(x.date, range))
+    ? data.accuracyRecords.filter(x =>
+        isDateInRange(x.date, normalizedRange)
+      )
     : [];
 
   const memberMap = {};
+
   sheetRows.forEach(x => {
     const name = String(x.name || "").trim();
     if (!name) return;
 
     if (!memberMap[name]) {
-      memberMap[name] = { name, completed: 0, reviewed: 0 };
+      memberMap[name] = {
+        name,
+        completed: 0,
+        reviewed: 0
+      };
     }
 
     const worked = Number(x.worked) || 0;
+
     memberMap[name].completed += worked;
 
     if (/review/i.test(String(x.type || ""))) {
@@ -2783,37 +2819,74 @@ function Analytics({ data }) {
     }
   });
 
-  const productivityRows = Object.values(memberMap).sort((a, b) => b.completed - a.completed);
-  const max = Math.max(...productivityRows.map(x => x.completed), 1);
-  const maxDaily = Math.max(...accuracyRows.map(x => Number(x.dailyCount) || 0), 1);
+  const productivityRows = Object.values(memberMap).sort(
+    (a, b) => b.completed - a.completed
+  );
+
+  const max = Math.max(
+    ...productivityRows.map(x => x.completed),
+    1
+  );
+
+  const maxDaily = Math.max(
+    ...accuracyRows.map(x => Number(x.dailyCount) || 0),
+    1
+  );
 
   const averageAccuracy = accuracyRows.length
-    ? accuracyRows.reduce((s, x) => s + (Number(x.accuracy) || 0), 0) / accuracyRows.length
+    ? accuracyRows.reduce(
+        (s, x) => s + (Number(x.accuracy) || 0),
+        0
+      ) / accuracyRows.length
     : 0;
 
   const averageScore = accuracyRows.length
-    ? accuracyRows.reduce((s, x) => s + (Number(x.score) || 0), 0) / accuracyRows.length
+    ? accuracyRows.reduce(
+        (s, x) => s + (Number(x.score) || 0),
+        0
+      ) / accuracyRows.length
     : 0;
 
-  const totalWorked = productivityRows.reduce((s, x) => s + x.completed, 0);
-  const totalTarget = data.team.reduce((s, x) => s + (Number(x.target) || 0), 0);
+  const totalWorked = productivityRows.reduce(
+    (s, x) => s + x.completed,
+    0
+  );
+
+  const totalTarget = data.team.reduce(
+    (s, x) => s + (Number(x.target) || 0),
+    0
+  );
 
   return (
     <Page
       title="Analytics"
       subtitle={`Productivity and accuracy analytics for ${range.label.toLowerCase()}.`}
     >
-      <DateFilter value={period} onChange={setPeriod} data={data} />
+      <DateFilter
+        value={period}
+        onChange={setPeriod}
+        data={data}
+      />
 
       <Panel title={`Completed images by team member — ${range.label}`}>
         {!productivityRows.length ? (
-          <p className="muted">No Daily Effort records exist for <b>{range.label}</b>.</p>
+          <p className="muted">
+            No Daily Effort records exist for <b>{range.label}</b>.
+          </p>
         ) : (
           <div className="bars">
             {productivityRows.map(x => (
               <div className="bar-row" key={x.name}>
                 <span>{x.name}</span>
-                <div><i style={{ width: `${(x.completed / max) * 100}%` }} /></div>
+
+                <div>
+                  <i
+                    style={{
+                      width: `${(x.completed / max) * 100}%`
+                    }}
+                  />
+                </div>
+
                 <b>{x.completed.toLocaleString()}</b>
               </div>
             ))}
@@ -2823,33 +2896,70 @@ function Analytics({ data }) {
 
       <div className="grid three">
         <Panel title="Capacity">
-          <div className="big-number">{totalTarget ? Math.round((totalWorked / totalTarget) * 100) : 0}%</div>
-          <p className="muted">Selected-period work vs current team targets</p>
+          <div className="big-number">
+            {totalTarget
+              ? Math.round((totalWorked / totalTarget) * 100)
+              : 0}
+            %
+          </div>
+
+          <p className="muted">
+            Selected-period work vs current team targets
+          </p>
         </Panel>
 
         <Panel title="Accuracy health">
-          <div className="big-number">{accuracyRows.length ? `${averageAccuracy.toFixed(1)}%` : "—"}</div>
-          <p className="muted">Average accuracy from Accuracy Report</p>
+          <div className="big-number">
+            {accuracyRows.length
+              ? `${averageAccuracy.toFixed(1)}%`
+              : "—"}
+          </div>
+
+          <p className="muted">
+            Average accuracy from Accuracy Report
+          </p>
+
           <Progress value={averageAccuracy} />
         </Panel>
 
         <Panel title="Average score">
-          <div className="big-number">{accuracyRows.length ? averageScore.toFixed(1) : "—"}</div>
-          <p className="muted">Score from Accuracy Report</p>
+          <div className="big-number">
+            {accuracyRows.length
+              ? averageScore.toFixed(1)
+              : "—"}
+          </div>
+
+          <p className="muted">
+            Score from Accuracy Report
+          </p>
         </Panel>
       </div>
 
       <Panel title={`Accuracy by team member — ${range.label}`}>
         {!accuracyRows.length ? (
-          <p className="muted">No Accuracy Report data exists for <b>{range.label}</b>.</p>
+          <p className="muted">
+            No Accuracy Report data exists for <b>{range.label}</b>.
+          </p>
         ) : (
           <div className="bars">
             {accuracyRows.map((x, i) => {
-              const accuracy = Math.max(0, Math.min(100, Number(x.accuracy) || 0));
+              const accuracy = Math.max(
+                0,
+                Math.min(100, Number(x.accuracy) || 0)
+              );
+
               return (
                 <div className="bar-row" key={x.id || i}>
                   <span>{x.name}</span>
-                  <div><i style={{ width: `${accuracy}%` }} /></div>
+
+                  <div>
+                    <i
+                      style={{
+                        width: `${accuracy}%`
+                      }}
+                    />
+                  </div>
+
                   <b>{accuracy.toFixed(1)}%</b>
                 </div>
               );
@@ -2860,14 +2970,28 @@ function Analytics({ data }) {
 
       <Panel title={`Daily count from Accuracy Report — ${range.label}`}>
         {!accuracyRows.length ? (
-          <p className="muted">No Accuracy Report data available.</p>
+          <p className="muted">
+            No Accuracy Report data available.
+          </p>
         ) : (
           <div className="bars">
             {accuracyRows.map((x, i) => (
               <div className="bar-row" key={x.id || i}>
                 <span>{x.name}</span>
-                <div><i style={{ width: `${((Number(x.dailyCount) || 0) / maxDaily) * 100}%` }} /></div>
-                <b>{Number(x.dailyCount || 0).toLocaleString()}</b>
+
+                <div>
+                  <i
+                    style={{
+                      width: `${
+                        ((Number(x.dailyCount) || 0) / maxDaily) * 100
+                      }%`
+                    }}
+                  />
+                </div>
+
+                <b>
+                  {Number(x.dailyCount || 0).toLocaleString()}
+                </b>
               </div>
             ))}
           </div>
