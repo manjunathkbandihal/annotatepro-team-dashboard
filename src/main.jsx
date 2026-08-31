@@ -142,38 +142,88 @@ function pad2(value) {
 }
 
 function toISODate(year, month, day) {
-  const y = Number(year), m = Number(month), d = Number(day);
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+
   if (!y || !m || !d) return "";
+
   const date = new Date(y, m - 1, d);
+
   if (Number.isNaN(date.getTime())) return "";
-  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return "";
+
+  if (
+    date.getFullYear() !== y ||
+    date.getMonth() !== m - 1 ||
+    date.getDate() !== d
+  ) {
+    return "";
+  }
+
   return `${y}-${pad2(m)}-${pad2(d)}`;
 }
 
 function normalizeDateValue(value) {
   if (value == null || value === "") return "";
 
+  // Excel / Google Sheets date returned as a JavaScript Date
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return toISODate(value.getFullYear(), value.getMonth() + 1, value.getDate());
+    return toISODate(
+      value.getFullYear(),
+      value.getMonth() + 1,
+      value.getDate()
+    );
   }
 
-  if (typeof value === "number" && Number.isFinite(value) && value > 20000 && value < 80000) {
-    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
-    const d = new Date(excelEpoch.getTime() + Math.round(value * 86400000));
-    return toISODate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  // Excel serial date
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value > 20000 &&
+    value < 80000
+  ) {
+    const excelEpoch = new Date(1899, 11, 30);
+
+    const d = new Date(
+      excelEpoch.getTime() + Math.round(value * 86400000)
+    );
+
+    return toISODate(
+      d.getFullYear(),
+      d.getMonth() + 1,
+      d.getDate()
+    );
   }
 
   const text = String(value).trim();
-  let m = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-  if (m) return toISODate(m[1], m[2], m[3]);
 
-  m = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
-  if (m) return toISODate(m[3], m[2], m[1]);
+  // YYYY-MM-DD / YYYY/MM/DD / YYYY.MM.DD
+  let m = text.match(
+    /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/
+  );
 
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime())
-    ? ""
-    : toISODate(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate());
+  if (m) {
+    return toISODate(m[1], m[2], m[3]);
+  }
+
+  // DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY
+  m = text.match(
+    /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/
+  );
+
+  if (m) {
+    return toISODate(m[3], m[2], m[1]);
+  }
+
+  // Do NOT use new Date("YYYY-MM-DD") blindly.
+  // If the value is an ISO date string, extract the calendar date directly.
+  m = text.match(/^(\d{4})[-](\d{1,2})[-](\d{1,2})$/);
+
+  if (m) {
+    return toISODate(m[1], m[2], m[3]);
+  }
+
+  return "";
 }
 
 function getDateRange(filter) {
