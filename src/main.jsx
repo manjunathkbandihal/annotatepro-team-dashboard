@@ -3108,7 +3108,7 @@ console.log("DATE STARTS:", dateStarts);
         const records = [];
         const names = [];
 
-        for (let r = 2; r < rows.length; r++) {
+        for (let r = 5; r < rows.length; r++) {
           const name = rows[r]?.[0];
           if (!name) continue;
 
