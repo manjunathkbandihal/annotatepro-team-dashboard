@@ -3071,12 +3071,8 @@ function SheetImport({ data, update, notify }) {
 
 const firstRow = rows[0] || [];
 
-// Each date occupies exactly 4 columns:
-// Project | Annotation/Review | Total images worked | Link to the range
-
-for (let c = 1; c < firstRow.length; c += 4) {
-  const v = firstRow[c];
-  const date = normalizeDateValue(v);
+for (let c = 1; c < firstRow.length; c++) {
+  const date = normalizeDateValue(firstRow[c]);
 
   if (date) {
     dateStarts.push({
@@ -3085,6 +3081,14 @@ for (let c = 1; c < firstRow.length; c += 4) {
     });
   }
 }
+
+console.log(
+  "DATE STARTS:",
+  dateStarts.map(x => ({
+    column: x.c,
+    date: x.date
+  }))
+);
 
 console.log("DATE STARTS:", dateStarts);
 
