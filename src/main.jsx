@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { createRoot } from "react-dom/client";
 import {
@@ -612,6 +612,95 @@ function getLatestImportedDate(data) {
 
 
 /* =========================================================
+   NOTIFICATIONS
+   Two kinds today:
+   - Project deadlines that are approaching or already past
+   - High severity issues that have been open too long
+========================================================= */
+
+const DEADLINE_WARNING_DAYS = 7;
+const STALE_HIGH_SEVERITY_DAYS = 2;
+
+function getTodayISO() {
+  const d = new Date();
+  return toISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+
+// Whole-day difference between two YYYY-MM-DD calendar dates (toISO - fromISO).
+function daysBetweenDates(fromISO, toISO) {
+  const a = dateKeyToLocalDate(fromISO);
+  const b = dateKeyToLocalDate(toISO);
+  if (!a || !b) return null;
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+}
+
+function getNotifications(data) {
+  const today = getTodayISO();
+  const items = [];
+
+  (Array.isArray(data?.projects) ? data.projects : []).forEach(p => {
+    if (p.status === "Completed") return;
+
+    const deadline = normalizeDateValue(p.deadline);
+    if (!deadline) return;
+
+    const daysLeft = daysBetweenDates(today, deadline);
+    if (daysLeft == null) return;
+
+    if (daysLeft < 0) {
+      const overdue = Math.abs(daysLeft);
+      items.push({
+        id: `deadline-${p.id}`,
+        kind: "overdue",
+        title: `${p.name} is overdue`,
+        detail: `Deadline was ${overdue} day${overdue === 1 ? "" : "s"} ago (${deadline})`,
+        date: deadline
+      });
+    } else if (daysLeft <= DEADLINE_WARNING_DAYS) {
+      items.push({
+        id: `deadline-${p.id}`,
+        kind: "deadline",
+        title:
+          daysLeft === 0
+            ? `${p.name} is due today`
+            : `${p.name} deadline in ${daysLeft} day${daysLeft === 1 ? "" : "s"}`,
+        detail: `Due ${deadline}`,
+        date: deadline
+      });
+    }
+  });
+
+  (Array.isArray(data?.issues) ? data.issues : []).forEach(issue => {
+    if (issue.severity !== "High" || issue.status !== "Open") return;
+
+    const opened = normalizeDateValue(issue.date);
+    if (!opened) return;
+
+    const age = daysBetweenDates(opened, today);
+    if (age == null || age < STALE_HIGH_SEVERITY_DAYS) return;
+
+    items.push({
+      id: `issue-${issue.id}`,
+      kind: "issue",
+      title: `High severity issue open ${age} day${age === 1 ? "" : "s"}`,
+      detail: `${issue.type || "Issue"} — ${issue.project || "Unknown project"}${
+        issue.owner ? ` — ${issue.owner}` : ""
+      }`,
+      date: opened
+    });
+  });
+
+  // Overdue and long-open issues first, then soonest deadlines.
+  const rank = { overdue: 0, issue: 1, deadline: 2 };
+  return items.sort((a, b) => {
+    const r = (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9);
+    if (r !== 0) return r;
+    return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  });
+}
+
+
+/* =========================================================
    DATE FILTER
 ========================================================= */
 
@@ -988,6 +1077,21 @@ function DashboardApp({ session, profile, onSignOut }) {
   const [editingMember, setEditingMember] = useState(null);
   const [editingProject, setEditingProject] = useState(null);
   const [toast, setToast] = useState("");
+  const [showNotif, setShowNotif] = useState(false);
+  const notifRef = useRef(null);
+
+  const notifications = useMemo(() => getNotifications(data), [data.projects, data.issues]);
+
+  useEffect(() => {
+    if (!showNotif) return;
+    function handleClickAway(e) {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setShowNotif(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickAway);
+    return () => document.removeEventListener("mousedown", handleClickAway);
+  }, [showNotif]);
 
   const role = profile?.role || "member";
   const canManageTeam = ["admin", "team_lead"].includes(role);
@@ -1324,6 +1428,70 @@ function DashboardApp({ session, profile, onSignOut }) {
 
   return (
     <div className="app">
+      <style>{`
+        .notif-wrap { position: relative; }
+        .notif-wrap .icon-btn { position: relative; }
+        .notif-wrap .icon-btn i {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #ef4444;
+          display: block;
+          font-style: normal;
+        }
+        .notif-panel {
+          position: absolute;
+          top: calc(100% + 10px);
+          right: 0;
+          width: 320px;
+          max-height: 380px;
+          overflow-y: auto;
+          background: var(--panel-bg, #101a2c);
+          border: 1px solid var(--border, rgba(255,255,255,0.08));
+          border-radius: 12px;
+          box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+          z-index: 50;
+          padding: 10px 0;
+        }
+        .notif-panel-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 4px 16px 10px;
+          border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+        }
+        .notif-empty {
+          padding: 20px 16px;
+          font-size: 13px;
+          color: var(--muted, #8b93a7);
+          margin: 0;
+        }
+        .notif-list { list-style: none; margin: 0; padding: 4px 0; }
+        .notif-item {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+          padding: 10px 16px;
+          border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .notif-item:last-child { border-bottom: none; }
+        .notif-dot {
+          margin-top: 5px;
+          width: 8px;
+          height: 8px;
+          min-width: 8px;
+          border-radius: 50%;
+        }
+        .notif-overdue .notif-dot { background: #ef4444; }
+        .notif-issue .notif-dot { background: #f59e0b; }
+        .notif-deadline .notif-dot { background: #3b82f6; }
+        .notif-title { margin: 0; font-size: 13px; font-weight: 600; }
+        .notif-detail { margin: 2px 0 0; font-size: 12px; color: var(--muted, #8b93a7); }
+      `}</style>
+
       <aside className={"sidebar " + (!sidebar ? "collapsed" : "")}>
         <div className="brand">
           <div className="brand-mark">A</div>
@@ -1378,10 +1546,42 @@ function DashboardApp({ session, profile, onSignOut }) {
           </div>
 
           <div className="top-actions">
-            <button className="icon-btn">
-              <Bell size={19} />
-              <i />
-            </button>
+            <div className="notif-wrap" ref={notifRef}>
+              <button
+                className="icon-btn"
+                onClick={() => setShowNotif(v => !v)}
+                aria-label="Notifications"
+              >
+                <Bell size={19} />
+                {notifications.length > 0 && <i />}
+              </button>
+
+              {showNotif && (
+                <div className="notif-panel">
+                  <div className="notif-panel-head">
+                    <b>Notifications</b>
+                    <span className="muted">{notifications.length}</span>
+                  </div>
+
+                  {notifications.length === 0 ? (
+                    <p className="notif-empty">You're all caught up.</p>
+                  ) : (
+                    <ul className="notif-list">
+                      {notifications.map(n => (
+                        <li key={n.id} className={`notif-item notif-${n.kind}`}>
+                          <span className="notif-dot" />
+                          <div>
+                            <p className="notif-title">{n.title}</p>
+                            <p className="notif-detail">{n.detail}</p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="avatar">{String(profile?.full_name || "U").slice(0, 2).toUpperCase()}</div>
             <div className="user">
               <b>{profile?.full_name || session?.user?.email || "User"}</b>
