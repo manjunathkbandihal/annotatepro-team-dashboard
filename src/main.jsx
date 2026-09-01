@@ -3081,7 +3081,28 @@ function SheetImport({ data, update, notify }) {
 const firstRow = rows[0] || [];
 
 for (let c = 1; c < firstRow.length; c++) {
-  const date = normalizeDateValue(firstRow[c]);
+  const rawValue = firstRow[c];
+
+  let date = "";
+
+  /*
+    IMPORTANT:
+    Spreadsheet date headers must be treated as calendar dates.
+    Do not allow timezone conversion to move the date backward.
+  */
+
+  if (
+    rawValue instanceof Date &&
+    !Number.isNaN(rawValue.getTime())
+  ) {
+    date = toISODate(
+      rawValue.getFullYear(),
+      rawValue.getMonth() + 1,
+      rawValue.getDate()
+    );
+  } else {
+    date = normalizeDateValue(rawValue);
+  }
 
   if (date) {
     dateStarts.push({
