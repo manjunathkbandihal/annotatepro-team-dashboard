@@ -6,7 +6,7 @@ import {
   AlertTriangle, BarChart3, Settings, Search, Plus, Bell,
   Download, Upload, Menu, X, CheckCircle2, Target,
   Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
-  LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink
+  LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
@@ -1194,6 +1194,7 @@ function DashboardApp({ session, profile, onSignOut }) {
     ["qa", "QA & Reviews", ClipboardCheck],
     ["issues", "Issues", AlertTriangle],
     ["analytics", "Analytics", BarChart3],
+    ["reports", "Reports", FileText],
     ["settings", "Settings", Settings],
     ["sheet", "Sheet Import", Upload]
   ];
@@ -1578,6 +1579,8 @@ function DashboardApp({ session, profile, onSignOut }) {
           )}
 
           {page === "analytics" && <Analytics data={data} />}
+
+          {page === "reports" && <Reports data={data} />}
 
           {page === "settings" && (
             <SettingsPage
@@ -3152,6 +3155,506 @@ function Analytics({ data }) {
         )}
       </Panel>
     </Page>
+  );
+}
+
+/* =========================================================
+   REPORTS
+   Report types: Daily, Weekly, Monthly, Custom range,
+   Project-wise, Employee-wise, QA report, Productivity report.
+   Export: Excel (.xlsx), CSV, Print/PDF (browser print).
+========================================================= */
+
+const WORK_TYPE_LABELS = {
+  daily: "Daily Report",
+  weekly: "Weekly Report",
+  monthly: "Monthly Report",
+  custom: "Custom Date-range Report",
+  project: "Project-wise Report",
+  employee: "Employee-wise Report",
+  qa: "QA Report",
+  productivity: "Productivity Report"
+};
+
+// Monday-Sunday week containing the given YYYY-MM-DD date.
+function getWeekRange(dateStr) {
+  const d = dateKeyToLocalDate(dateStr);
+  if (!d) return { start: "", end: "" };
+
+  const day = d.getDay(); // 0 = Sunday
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diffToMonday);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  return {
+    start: toISODate(monday.getFullYear(), monday.getMonth() + 1, monday.getDate()),
+    end: toISODate(sunday.getFullYear(), sunday.getMonth() + 1, sunday.getDate())
+  };
+}
+
+// Full calendar month for an "YYYY-MM" value (from <input type="month">).
+function getMonthRange(monthStr) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(monthStr || ""));
+  if (!m) return { start: "", end: "" };
+
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const lastDay = new Date(year, month, 0).getDate();
+
+  return {
+    start: toISODate(year, month, 1),
+    end: toISODate(year, month, lastDay)
+  };
+}
+
+function downloadBlob(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportRowsToExcel(filename, sheetName, rows) {
+  if (!rows.length) return;
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31) || "Report");
+  XLSX.writeFile(wb, filename);
+}
+
+function exportRowsToCSV(filename, rows) {
+  if (!rows.length) return;
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const csv = XLSX.utils.sheet_to_csv(ws);
+  downloadBlob(filename, csv, "text/csv;charset=utf-8;");
+}
+
+// Excludes weekend/leave placeholder rows so "work" totals aren't skewed.
+function isWorkRow(row) {
+  return !["Saturday", "Sunday", "On Leave", "Leave", "Holiday"].includes(row.project);
+}
+
+function buildTimeReport(data, range) {
+  const rows = (Array.isArray(data.sheetRecords) ? data.sheetRecords : [])
+    .filter(x => isDateInRange(x.date, range) && isWorkRow(x));
+
+  const byName = new Map();
+  rows.forEach(x => {
+    const key = x.name || "Unknown";
+    if (!byName.has(key)) {
+      byName.set(key, { name: key, imagesWorked: 0, workingDays: new Set(), projects: new Set() });
+    }
+    const entry = byName.get(key);
+    entry.imagesWorked += Number(x.worked) || 0;
+    if (x.date) entry.workingDays.add(x.date);
+    if (x.project) entry.projects.add(x.project);
+  });
+
+  const summary = [...byName.values()]
+    .map(x => ({
+      Name: x.name,
+      "Images Worked": x.imagesWorked,
+      "Working Days": x.workingDays.size,
+      "Avg / Day": x.workingDays.size ? Math.round(x.imagesWorked / x.workingDays.size) : 0,
+      Projects: [...x.projects].join(", ")
+    }))
+    .sort((a, b) => b["Images Worked"] - a["Images Worked"]);
+
+  const detail = rows
+    .map(x => ({
+      Date: x.date,
+      Name: x.name,
+      Project: x.project,
+      Type: x.type,
+      "Images Worked": Number(x.worked) || 0,
+      Link: x.link || ""
+    }))
+    .sort((a, b) => (a.Date < b.Date ? -1 : a.Date > b.Date ? 1 : a.Name < b.Name ? -1 : 1));
+
+  return { summary, detail };
+}
+
+function buildProjectReport(data, range, projectFilter) {
+  const rows = (Array.isArray(data.sheetRecords) ? data.sheetRecords : [])
+    .filter(x => isDateInRange(x.date, range) && isWorkRow(x))
+    .filter(x => !projectFilter || x.project === projectFilter);
+
+  const byProject = new Map();
+  rows.forEach(x => {
+    const key = x.project || "Unknown";
+    if (!byProject.has(key)) {
+      byProject.set(key, { project: key, imagesWorked: 0, people: new Set(), days: new Set() });
+    }
+    const entry = byProject.get(key);
+    entry.imagesWorked += Number(x.worked) || 0;
+    if (x.name) entry.people.add(x.name);
+    if (x.date) entry.days.add(x.date);
+  });
+
+  const projectMeta = new Map(
+    (Array.isArray(data.projects) ? data.projects : []).map(p => [p.name, p])
+  );
+
+  const summary = [...byProject.values()]
+    .map(x => {
+      const meta = projectMeta.get(x.project);
+      const stats = meta ? getProjectStats(meta) : null;
+      return {
+        Project: x.project,
+        "Images Worked (in range)": x.imagesWorked,
+        "Team Members": [...x.people].join(", "),
+        "Active Days": x.days.size,
+        Target: stats ? stats.total : "",
+        "Completed (overall)": stats ? stats.completed : "",
+        "Remaining (overall)": stats ? stats.remaining : "",
+        "Progress %": stats ? `${stats.progress}%` : "",
+        Status: meta ? meta.status : "",
+        Deadline: meta ? (meta.deadline || "") : ""
+      };
+    })
+    .sort((a, b) => b["Images Worked (in range)"] - a["Images Worked (in range)"]);
+
+  const detail = rows
+    .map(x => ({
+      Date: x.date,
+      Project: x.project,
+      Name: x.name,
+      Type: x.type,
+      "Images Worked": Number(x.worked) || 0,
+      Link: x.link || ""
+    }))
+    .sort((a, b) => (a.Date < b.Date ? -1 : a.Date > b.Date ? 1 : 1));
+
+  return { summary, detail };
+}
+
+function buildEmployeeReport(data, range, employeeFilter) {
+  const rows = (Array.isArray(data.sheetRecords) ? data.sheetRecords : [])
+    .filter(x => isDateInRange(x.date, range))
+    .filter(x => !employeeFilter || x.name === employeeFilter);
+
+  const workRows = rows.filter(isWorkRow);
+
+  const detail = workRows
+    .map(x => ({
+      Date: x.date,
+      Name: x.name,
+      Project: x.project,
+      Type: x.type,
+      "Images Worked": Number(x.worked) || 0,
+      Link: x.link || ""
+    }))
+    .sort((a, b) => (a.Date < b.Date ? -1 : a.Date > b.Date ? 1 : 1));
+
+  const totalImages = workRows.reduce((s, x) => s + (Number(x.worked) || 0), 0);
+  const workingDays = new Set(workRows.map(x => x.date)).size;
+  const leaveDays = rows.filter(x => ["On Leave", "Leave"].includes(x.project)).length;
+  const projects = [...new Set(workRows.map(x => x.project).filter(Boolean))];
+
+  const summary = employeeFilter
+    ? [{
+        Name: employeeFilter,
+        "Total Images Worked": totalImages,
+        "Working Days": workingDays,
+        "Avg / Day": workingDays ? Math.round(totalImages / workingDays) : 0,
+        "Leave Days": leaveDays,
+        Projects: projects.join(", ")
+      }]
+    : buildTimeReport(data, range).summary;
+
+  return { summary, detail };
+}
+
+function buildQAReportRows(data, range) {
+  const rows = (Array.isArray(data.accuracyRecords) ? data.accuracyRecords : [])
+    .filter(x => isDateInRange(x.date, range));
+
+  const byName = new Map();
+  rows.forEach(x => {
+    const key = x.name || "Unknown";
+    if (!byName.has(key)) {
+      byName.set(key, { name: key, dailyCount: 0, tp: 0, fp: 0, fn: 0, scoreSum: 0, scoreCount: 0 });
+    }
+    const entry = byName.get(key);
+    entry.dailyCount += Number(x.dailyCount) || 0;
+    entry.tp += Number(x.tp) || 0;
+    entry.fp += Number(x.fp) || 0;
+    entry.fn += Number(x.fn) || 0;
+    entry.scoreSum += Number(x.score) || 0;
+    entry.scoreCount += 1;
+  });
+
+  const summary = [...byName.values()]
+    .map(x => {
+      const denom = x.tp + x.fp + x.fn;
+      const accuracy = denom > 0 ? (x.tp / denom) * 100 : 0;
+      return {
+        Name: x.name,
+        "Daily Count": x.dailyCount,
+        TP: x.tp,
+        FP: x.fp,
+        FN: x.fn,
+        "Accuracy %": Number(accuracy.toFixed(1)),
+        "Avg Score": x.scoreCount ? Number((x.scoreSum / x.scoreCount).toFixed(1)) : 0
+      };
+    })
+    .sort((a, b) => b["Accuracy %"] - a["Accuracy %"]);
+
+  const detail = rows
+    .map(x => ({
+      Date: x.date,
+      Name: x.name,
+      "Daily Count": x.dailyCount,
+      TP: x.tp,
+      FP: x.fp,
+      FN: x.fn,
+      "Accuracy %": Number((x.accuracy || 0).toFixed(1)),
+      Score: x.score,
+      "Images Used": x.imagesUsed,
+      Comment: x.comment
+    }))
+    .sort((a, b) => (a.Date < b.Date ? -1 : a.Date > b.Date ? 1 : 1));
+
+  return { summary, detail };
+}
+
+function buildProductivityReport(data, range) {
+  const timeReport = buildTimeReport(data, range);
+  const targetByName = new Map(
+    (Array.isArray(data.team) ? data.team : []).map(t => [t.name, Number(t.target) || 0])
+  );
+
+  const summary = timeReport.summary
+    .map(x => {
+      const target = targetByName.get(x.Name) || 0;
+      const achievement = target ? Math.min(999, Math.round((x["Images Worked"] / target) * 100)) : "";
+      return {
+        Name: x.Name,
+        "Images Worked": x["Images Worked"],
+        Target: target || "",
+        "Achievement %": target ? `${achievement}%` : "",
+        "Working Days": x["Working Days"],
+        "Avg / Day": x["Avg / Day"],
+        Projects: x.Projects
+      };
+    })
+    .sort((a, b) => b["Images Worked"] - a["Images Worked"]);
+
+  return { summary, detail: timeReport.detail };
+}
+
+function Reports({ data }) {
+  const latestDate = getLatestImportedDate(data);
+
+  const [reportType, setReportType] = useState("daily");
+  const [singleDate, setSingleDate] = useState(latestDate);
+  const [weekDate, setWeekDate] = useState(latestDate);
+  const [monthValue, setMonthValue] = useState(latestDate ? latestDate.slice(0, 7) : "");
+  const [customFilter, setCustomFilter] = useState(() => ({
+    mode: "range",
+    start: latestDate,
+    end: latestDate
+  }));
+  const [projectFilter, setProjectFilter] = useState("");
+  const [employeeFilter, setEmployeeFilter] = useState("");
+  const [showDetail, setShowDetail] = useState(false);
+
+  const range = useMemo(() => {
+    if (reportType === "daily") {
+      const d = normalizeDateValue(singleDate);
+      return { start: d, end: d, label: d || "Select a date" };
+    }
+    if (reportType === "weekly") {
+      const w = getWeekRange(normalizeDateValue(weekDate));
+      return { ...w, label: w.start ? `${w.start} → ${w.end}` : "Select a date" };
+    }
+    if (reportType === "monthly") {
+      const m = getMonthRange(monthValue);
+      return { ...m, label: m.start ? `${m.start} → ${m.end}` : "Select a month" };
+    }
+    // custom, project, employee, qa, productivity all use the custom range picker
+    return getDateRange(customFilter);
+  }, [reportType, singleDate, weekDate, monthValue, customFilter]);
+
+  const report = useMemo(() => {
+    if (!range.start || !range.end) return { summary: [], detail: [] };
+    switch (reportType) {
+      case "project":
+        return buildProjectReport(data, range, projectFilter);
+      case "employee":
+        return buildEmployeeReport(data, range, employeeFilter);
+      case "qa":
+        return buildQAReportRows(data, range);
+      case "productivity":
+        return buildProductivityReport(data, range);
+      default:
+        return buildTimeReport(data, range);
+    }
+  }, [data, range, reportType, projectFilter, employeeFilter]);
+
+  const rowsForExport = showDetail && report.detail.length ? report.detail : report.summary;
+  const reportLabel = WORK_TYPE_LABELS[reportType] || "Report";
+  const fileBase = `AnnotatePro_${reportType}_${range.start || "report"}_${range.end || ""}`.replace(/[^a-zA-Z0-9_-]/g, "");
+
+  function handlePrint() {
+    window.print();
+  }
+
+  return (
+    <Page
+      title="Reports"
+      subtitle="Build a report, preview it, then export to Excel, CSV, or print/PDF."
+    >
+      <Panel title="Report builder">
+        <div className="report-controls">
+          <label>
+            Report type
+            <select value={reportType} onChange={e => setReportType(e.target.value)}>
+              <option value="daily">Daily report</option>
+              <option value="weekly">Weekly report</option>
+              <option value="monthly">Monthly report</option>
+              <option value="custom">Custom date-range report</option>
+              <option value="project">Project-wise report</option>
+              <option value="employee">Employee-wise report</option>
+              <option value="qa">QA report</option>
+              <option value="productivity">Productivity report</option>
+            </select>
+          </label>
+
+          {reportType === "daily" && (
+            <label>
+              Date
+              <input type="date" value={singleDate || ""} onChange={e => setSingleDate(e.target.value)} />
+            </label>
+          )}
+
+          {reportType === "weekly" && (
+            <label>
+              Any date in the week
+              <input type="date" value={weekDate || ""} onChange={e => setWeekDate(e.target.value)} />
+            </label>
+          )}
+
+          {reportType === "monthly" && (
+            <label>
+              Month
+              <input type="month" value={monthValue || ""} onChange={e => setMonthValue(e.target.value)} />
+            </label>
+          )}
+
+          {["custom", "project", "employee", "qa", "productivity"].includes(reportType) && (
+            <DateFilter value={customFilter} onChange={setCustomFilter} data={data} />
+          )}
+
+          {reportType === "project" && (
+            <label>
+              Project
+              <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
+                <option value="">All projects</option>
+                {(data.projects || []).map(p => (
+                  <option key={p.id} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {reportType === "employee" && (
+            <label>
+              Employee
+              <select value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}>
+                <option value="">All team members</option>
+                {(data.team || []).map(t => (
+                  <option key={t.id} value={t.name}>{t.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+
+        <div className="report-actions">
+          <label className="report-toggle">
+            <input type="checkbox" checked={showDetail} onChange={e => setShowDetail(e.target.checked)} />
+            Export/print detailed rows instead of summary
+          </label>
+
+          <div className="report-export-btns">
+            <button
+              className="secondary"
+              disabled={!rowsForExport.length}
+              onClick={() => exportRowsToExcel(`${fileBase}.xlsx`, reportLabel, rowsForExport)}
+            >
+              <Download size={16} /> Excel
+            </button>
+            <button
+              className="secondary"
+              disabled={!rowsForExport.length}
+              onClick={() => exportRowsToCSV(`${fileBase}.csv`, rowsForExport)}
+            >
+              <Download size={16} /> CSV
+            </button>
+            <button className="secondary" disabled={!rowsForExport.length} onClick={handlePrint}>
+              <Printer size={16} /> Print / PDF
+            </button>
+          </div>
+        </div>
+      </Panel>
+
+      <div className="report-printable">
+        <div className="report-print-head">
+          <h2>{reportLabel}</h2>
+          <p className="muted">{range.label}</p>
+        </div>
+
+        <Panel title={`${reportLabel} — ${report.summary.length} row${report.summary.length === 1 ? "" : "s"}`}>
+          {!range.start || !range.end ? (
+            <p className="muted">Select a date{["custom", "project", "employee", "qa", "productivity"].includes(reportType) ? " range" : ""} to build the report.</p>
+          ) : !report.summary.length ? (
+            <p className="muted">No data found for <b>{range.label}</b>.</p>
+          ) : (
+            <ReportTable rows={report.summary} />
+          )}
+        </Panel>
+
+        {showDetail && report.detail.length > 0 && (
+          <Panel title={`Detailed rows — ${report.detail.length}`}>
+            <ReportTable rows={report.detail} />
+          </Panel>
+        )}
+      </div>
+    </Page>
+  );
+}
+
+function ReportTable({ rows }) {
+  if (!rows.length) return null;
+  const columns = Object.keys(rows[0]);
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {columns.map(col => <th key={col}>{col}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}>
+              {columns.map(col => <td key={col}>{row[col] === "" || row[col] == null ? "—" : String(row[col])}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
