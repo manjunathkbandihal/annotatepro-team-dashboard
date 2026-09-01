@@ -228,3 +228,60 @@
     display: none;
   }
 }
+
+/* Notification bell dropdown */
+.notif-wrap { position: relative; }
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 320px;
+  max-height: 380px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e5e9f0;
+  border-radius: 13px;
+  box-shadow: 0 20px 50px rgba(20, 30, 60, 0.14);
+  z-index: 50;
+  padding: 8px 0;
+}
+.notif-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px 10px;
+  border-bottom: 1px solid #edf0f4;
+}
+.notif-panel-head b { font-size: 14px; color: #172033; }
+.notif-empty {
+  padding: 22px 16px;
+  font-size: 12px;
+  color: #8a94a5;
+  margin: 0;
+  text-align: center;
+}
+.notif-list { list-style: none; margin: 0; padding: 4px 0; }
+.notif-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px 16px;
+  border-bottom: 1px solid #f0f2f5;
+}
+.notif-item:last-child { border-bottom: 0; }
+.notif-dot {
+  margin-top: 5px;
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+}
+.notif-overdue .notif-dot { background: #d64d64; }
+.notif-issue .notif-dot { background: #c98a1f; }
+.notif-deadline .notif-dot { background: #4f46e5; }
+.notif-title { margin: 0; font-size: 12px; font-weight: 700; color: #293347; }
+.notif-detail { margin: 3px 0 0; font-size: 11px; color: #8b95a6; }
+
+@media (max-width: 500px) {
+  .notif-panel { width: 280px; right: -60px; }
+}
