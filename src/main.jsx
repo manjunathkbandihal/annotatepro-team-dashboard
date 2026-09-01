@@ -334,10 +334,19 @@ function normalizeDateValue(value) {
     value instanceof Date &&
     !Number.isNaN(value.getTime())
   ) {
+    /*
+      IMPORTANT:
+      XLSX (with cellDates: true) builds this Date object
+      anchored to UTC midnight for the calendar date shown
+      in the sheet. Reading it back with LOCAL getters
+      (getFullYear/getMonth/getDate) can shift the day
+      depending on the browser's timezone offset.
+      Always use the UTC getters here.
+    */
     return toISODate(
-      value.getFullYear(),
-      value.getMonth() + 1,
-      value.getDate()
+      value.getUTCFullYear(),
+      value.getUTCMonth() + 1,
+      value.getUTCDate()
     );
   }
 
@@ -3095,10 +3104,15 @@ for (let c = 1; c < firstRow.length; c++) {
     rawValue instanceof Date &&
     !Number.isNaN(rawValue.getTime())
   ) {
+    /*
+      Same fix as normalizeDateValue(): XLSX gives us a
+      Date anchored to UTC midnight, so we must read it
+      back with UTC getters, not local ones.
+    */
     date = toISODate(
-      rawValue.getFullYear(),
-      rawValue.getMonth() + 1,
-      rawValue.getDate()
+      rawValue.getUTCFullYear(),
+      rawValue.getUTCMonth() + 1,
+      rawValue.getUTCDate()
     );
   } else {
     date = normalizeDateValue(rawValue);
