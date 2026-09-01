@@ -2018,7 +2018,16 @@ function Dashboard({ totals, data, setPage }) {
       <div className="page-head">
         <div>
           <p className="eyebrow">TEAM OPERATIONS</p>
-          <h1>Good evening, Manjunath 👋</h1>
+          <h1>
+  {new Date().getHours() < 12
+    ? "Good morning"
+    : new Date().getHours() < 17
+    ? "Good afternoon"
+    : new Date().getHours() < 21
+    ? "Good evening"
+    : "Good night"}
+  , Manjunath 👋
+</h1>
           <p className="sub">
             Here’s your team's operational overview for today.
           </p>
