@@ -3074,9 +3074,19 @@ function SheetImport({ data, update, notify }) {
 
     reader.onload = e => {
       try {
+        /*
+          IMPORTANT: do NOT use cellDates: true here.
+          SheetJS builds those Date objects using the
+          browser's LOCAL clock, so reading them back
+          (with either local or UTC getters) is ambiguous
+          and shifts by a day depending on the user's
+          timezone offset. Instead we keep raw Excel
+          serial numbers and convert them ourselves with
+          pure UTC-epoch math (see normalizeDateValue),
+          which is timezone-independent.
+        */
         const wb = XLSX.read(e.target.result, {
-          type: "array",
-          cellDates: true
+          type: "array"
         });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, {
@@ -3299,9 +3309,11 @@ console.log("DATE STARTS:", dateStarts);
 
     reader.onload = e => {
       try {
+        // Same reasoning as parseWorkbook: skip cellDates
+        // and let normalizeDateValue convert raw serial
+        // numbers with timezone-independent UTC math.
         const wb = XLSX.read(e.target.result, {
-          type: "array",
-          cellDates: true
+          type: "array"
         });
 
         const ws = wb.Sheets[wb.SheetNames[0]];
