@@ -285,3 +285,83 @@
 @media (max-width: 500px) {
   .notif-panel { width: 280px; right: -60px; }
 }
+
+/* Reports page */
+.report-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+.report-controls > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #596477;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  min-width: 170px;
+}
+.report-controls select,
+.report-controls input[type="date"],
+.report-controls input[type="month"] {
+  padding: 10px 11px;
+  border: 1px solid #dfe4eb;
+  border-radius: 8px;
+  outline: 0;
+  background: #fff;
+  font-size: 13px;
+  color: #172033;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.report-controls select:focus,
+.report-controls input:focus {
+  border-color: #786cf0;
+  box-shadow: 0 0 0 3px #786cf018;
+}
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #edf0f4;
+}
+.report-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #596477;
+}
+.report-toggle input { width: 15px; height: 15px; }
+.report-export-btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.report-export-btns .secondary { display: inline-flex; align-items: center; gap: 6px; }
+.report-export-btns .secondary:disabled { opacity: .5; cursor: not-allowed; }
+.report-print-head { display: none; }
+
+@media (max-width: 800px) {
+  .report-controls { flex-direction: column; align-items: stretch; }
+  .report-controls > label { min-width: 0; }
+  .report-actions { flex-direction: column; align-items: stretch; }
+}
+
+/* Print only the report content, not the whole app chrome */
+@media print {
+  body * { visibility: hidden; }
+  .report-printable, .report-printable * { visibility: visible; }
+  .report-printable {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .report-print-head { display: block; margin-bottom: 16px; }
+  .report-print-head h2 { margin: 0 0 4px; }
+}
