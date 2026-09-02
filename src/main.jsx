@@ -6,7 +6,8 @@ import {
   AlertTriangle, BarChart3, Settings, Search, Plus, Bell,
   Download, Upload, Menu, X, CheckCircle2, Target,
   Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
-  LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer
+  LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer,
+  Calendar, Sun
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
@@ -98,7 +99,9 @@ const seed = {
     { id: 1, type: "Missed labels", project: "PCI_Annotations", owner: "Priya", severity: "High", status: "Open", date: "2026-08-11" },
     { id: 2, type: "Wrong prediction", project: "hase2_july_data_1", owner: "Kiran", severity: "Medium", status: "Open", date: "2026-08-11" },
     { id: 3, type: "Label inconsistency", project: "PCI_Annotations", owner: "Rahul", severity: "Low", status: "Resolved", date: "2026-08-10" }
-  ]
+  ],
+
+  holidays: []
 };
 
 
@@ -144,6 +147,10 @@ function loadData() {
 
       accuracyRecords: Array.isArray(saved.accuracyRecords)
         ? saved.accuracyRecords
+        : [],
+
+      holidays: Array.isArray(saved.holidays)
+        ? saved.holidays
         : [],
 
       accuracyFile: saved.accuracyFile || "",
@@ -1190,6 +1197,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   const nav = [
     ["dashboard", "Dashboard", LayoutDashboard],
     ["team", "Team", Users],
+    ["attendance", "Attendance", Calendar],
     ["projects", "Projects", FolderKanban],
     ["qa", "QA & Reviews", ClipboardCheck],
     ["issues", "Issues", AlertTriangle],
@@ -1548,6 +1556,15 @@ function DashboardApp({ session, profile, onSignOut }) {
               }}
               onEdit={member => { setEditingMember(member); setAddType("team"); setShowAdd(true); }}
               onDelete={removeTeamMember}
+            />
+          )}
+
+          {page === "attendance" && (
+            <Attendance
+              data={data}
+              update={update}
+              canManage={canManageTeam}
+              notify={notify}
             />
           )}
 
@@ -2644,6 +2661,215 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
             </tbody>
           </table>
         </div>
+      </Panel>
+    </Page>
+  );
+}
+
+/* =========================================================
+   ATTENDANCE
+   Derived from the imported sheet where possible:
+   - Week Off: the calendar date is a Saturday/Sunday
+   - Holiday: a date added to the manual holiday list
+   - Leave: a sheet row whose Project cell reads "On Leave" / "Leave"
+     (per the team's convention, absences are also logged this way)
+   - Present: a real work row exists for that person/date
+   - No data: nothing on file for that person/date
+========================================================= */
+
+function listDatesInRange(range) {
+  const dates = [];
+  let cur = dateKeyToLocalDate(range.start);
+  const end = dateKeyToLocalDate(range.end);
+  if (!cur || !end) return dates;
+
+  while (cur.getTime() <= end.getTime()) {
+    dates.push(toISODate(cur.getFullYear(), cur.getMonth() + 1, cur.getDate()));
+    cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+  }
+  return dates;
+}
+
+function isWeekendDate(dateISO) {
+  const d = dateKeyToLocalDate(dateISO);
+  if (!d) return false;
+  const day = d.getDay();
+  return day === 0 || day === 6;
+}
+
+function getAttendanceStatus(dateISO, rowsForCell, holidaySet) {
+  if (holidaySet.has(dateISO)) return "Holiday";
+  if (isWeekendDate(dateISO)) return "Week Off";
+
+  if (!rowsForCell || !rowsForCell.length) return "No data";
+
+  const onLeave = rowsForCell.some(r => ["On Leave", "Leave"].includes(r.project));
+  if (onLeave) return "Leave";
+
+  const worked = rowsForCell.some(isWorkRow);
+  if (worked) return "Present";
+
+  // Rows exist but only carry a weekend-style placeholder on a date the
+  // calendar doesn't consider a weekend (rare) — treat conservatively as leave.
+  return "Leave";
+}
+
+function buildAttendanceMatrix(data, range) {
+  const dates = listDatesInRange(range);
+
+  const names = (Array.isArray(data.team) && data.team.length)
+    ? data.team.map(t => t.name)
+    : [...new Set((Array.isArray(data.sheetRecords) ? data.sheetRecords : []).map(r => r.name))];
+
+  const byKey = new Map();
+  (Array.isArray(data.sheetRecords) ? data.sheetRecords : []).forEach(r => {
+    const key = `${r.name}__${r.date}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(r);
+  });
+
+  const holidaySet = new Set(
+    (Array.isArray(data.holidays) ? data.holidays : []).map(h => h.date)
+  );
+
+  const rows = names.map(name => ({
+    name,
+    cells: dates.map(date => ({
+      date,
+      status: getAttendanceStatus(date, byKey.get(`${name}__${date}`), holidaySet)
+    }))
+  }));
+
+  const summary = { Present: 0, Leave: 0, "Week Off": 0, Holiday: 0, "No data": 0 };
+  rows.forEach(row => {
+    row.cells.forEach(c => {
+      summary[c.status] = (summary[c.status] || 0) + 1;
+    });
+  });
+
+  return { dates, rows, summary };
+}
+
+function Attendance({ data, update, canManage, notify }) {
+  const latestDate = getLatestImportedDate(data);
+  const defaultRange = getWeekRange(latestDate || getTodayISO());
+
+  const [filter, setFilter] = useState({
+    mode: "range",
+    start: defaultRange.start,
+    end: defaultRange.end
+  });
+  const [holidayDate, setHolidayDate] = useState("");
+  const [holidayName, setHolidayName] = useState("");
+
+  const range = useMemo(() => getDateRange(filter), [filter]);
+  const matrix = useMemo(() => buildAttendanceMatrix(data, range), [data, range]);
+
+  function addHoliday(e) {
+    e.preventDefault();
+    if (!canManage) return notify && notify("Only Admin or Team Lead can manage holidays.");
+
+    const d = normalizeDateValue(holidayDate);
+    if (!d) return;
+
+    const holidays = [
+      ...(Array.isArray(data.holidays) ? data.holidays : []),
+      { id: Date.now(), date: d, name: holidayName.trim() || "Holiday" }
+    ];
+    update({ ...data, holidays });
+    setHolidayDate("");
+    setHolidayName("");
+  }
+
+  function removeHoliday(id) {
+    if (!canManage) return notify && notify("Only Admin or Team Lead can manage holidays.");
+    update({
+      ...data,
+      holidays: (Array.isArray(data.holidays) ? data.holidays : []).filter(h => h.id !== id)
+    });
+  }
+
+  return (
+    <Page
+      title="Attendance"
+      subtitle="Present, on leave, week off, and holidays — derived from your imported sheet."
+    >
+      <Panel title="Date range">
+        <DateFilter value={filter} onChange={setFilter} data={data} />
+      </Panel>
+
+      <div className="cards">
+        <Metric icon={CheckCircle2} label="Present" value={matrix.summary["Present"] || 0} />
+        <Metric icon={Users} label="On leave" value={matrix.summary["Leave"] || 0} />
+        <Metric icon={Calendar} label="Week off" value={matrix.summary["Week Off"] || 0} />
+        <Metric icon={Sun} label="Holiday" value={matrix.summary["Holiday"] || 0} />
+      </div>
+
+      {canManage && (
+        <Panel title="Holidays">
+          <form className="report-controls" onSubmit={addHoliday}>
+            <label>
+              Date
+              <input type="date" value={holidayDate} onChange={e => setHolidayDate(e.target.value)} />
+            </label>
+            <label>
+              Name
+              <input
+                type="text"
+                placeholder="e.g. Independence Day"
+                value={holidayName}
+                onChange={e => setHolidayName(e.target.value)}
+              />
+            </label>
+            <button className="secondary" type="submit">
+              <Plus size={16} /> Add holiday
+            </button>
+          </form>
+
+          {(data.holidays || []).length > 0 && (
+            <ul className="holiday-list">
+              {[...data.holidays]
+                .sort((a, b) => (a.date < b.date ? -1 : 1))
+                .map(h => (
+                  <li key={h.id}>
+                    <span><b>{h.date}</b> — {h.name}</span>
+                    <button className="delete" onClick={() => removeHoliday(h.id)}>
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </Panel>
+      )}
+
+      <Panel title={`Attendance grid — ${matrix.rows.length} team member${matrix.rows.length === 1 ? "" : "s"}`}>
+        {!matrix.dates.length ? (
+          <p className="muted">Select a date range to see attendance.</p>
+        ) : !matrix.rows.length ? (
+          <p className="muted">No team members or sheet records to show yet.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  {matrix.dates.map(d => <th key={d}>{d.slice(5)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {matrix.rows.map(row => (
+                  <tr key={row.name}>
+                    <td><b>{row.name}</b></td>
+                    {row.cells.map(c => (
+                      <td key={c.date}><Status text={c.status} /></td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
     </Page>
   );
