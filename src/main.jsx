@@ -2180,6 +2180,17 @@ function Dashboard({ totals, data, setPage }) {
     ? Math.round((totals.done / totals.total) * 100)
     : 0;
 
+  // Overview panel: surface what's currently being worked on rather than
+  // every project. In Progress first, then Pending, Completed/No Target last.
+  const statusRank = { "In Progress": 0, "Pending": 1, "No Target": 2, "Completed": 3 };
+  const highlightedProjects = [...data.projects]
+    .sort((a, b) => {
+      const r = (statusRank[a.status] ?? 9) - (statusRank[b.status] ?? 9);
+      if (r !== 0) return r;
+      return getProjectStats(b).progress - getProjectStats(a).progress;
+    })
+    .slice(0, 5);
+
   return (
     <div>
       <div className="page-head">
@@ -2295,7 +2306,7 @@ function Dashboard({ totals, data, setPage }) {
           onAction={() => setPage("projects")}
         >
           <div className="project-list">
-            {data.projects.map(p => {
+            {highlightedProjects.map(p => {
               const s = getProjectStats(p);
 
               return (
@@ -2322,6 +2333,15 @@ function Dashboard({ totals, data, setPage }) {
               );
             })}
           </div>
+
+          {data.projects.length > highlightedProjects.length && (
+            <p className="muted" style={{ marginTop: 14 }}>
+              Showing {highlightedProjects.length} of {data.projects.length} projects, most active first.{" "}
+              <button className="link-btn" style={{ display: "inline" }} onClick={() => setPage("projects")}>
+                View all
+              </button>
+            </p>
+          )}
         </Panel>
       </div>
 
