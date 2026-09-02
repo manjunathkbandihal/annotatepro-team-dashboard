@@ -599,8 +599,11 @@ function isDateInRange(date, range) {
 
 function getLatestImportedDate(data) {
   const dates = [
+    // Only rows with real work count — a pre-filled "Saturday"/"Sunday"
+    // placeholder for a future date that hasn't happened yet must not
+    // get picked as the latest date.
     ...(Array.isArray(data?.sheetRecords)
-      ? data.sheetRecords.map(x =>
+      ? data.sheetRecords.filter(isWorkRow).map(x =>
           normalizeDateValue(x.date)
         )
       : []),
@@ -2574,7 +2577,7 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
     data.sheetRecords.length > 0;
 
   const latestDate = imported
-    ? [...new Set(data.sheetRecords.map(x => x.date).filter(Boolean))]
+    ? [...new Set(data.sheetRecords.filter(isWorkRow).map(x => x.date).filter(Boolean))]
         .sort()
         .pop()
     : null;
@@ -4071,7 +4074,12 @@ function SheetImport({ data, update, notify }) {
           }
         });
 
-        const workDates = [...new Set(records.map(x => x.date).filter(Boolean))].sort();
+        // Only dates with real work count toward "today" — a pre-filled
+        // Saturday/Sunday placeholder for a future date that hasn't
+        // happened yet must never be picked as the latest date, or every
+        // team member's daily completed/target would compute against an
+        // empty day and show as 0.
+        const workDates = [...new Set(records.filter(isWorkRow).map(x => x.date).filter(Boolean))].sort();
         const today = workDates[workDates.length - 1] || new Date().toISOString().slice(0, 10);
         const todayRows = records.filter(
           x => x.date === today && !["Saturday", "Sunday", "On Leave"].includes(x.project)
