@@ -3955,127 +3955,101 @@ function SheetImport({ data, update, notify }) {
         const wb = XLSX.read(e.target.result, {
           type: "array"
         });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, {
-          header: 1,
-          defval: null,
-          raw: true
-        });
 
-        const dateStarts = [];
-
-const firstRow = rows[0] || [];
-
-for (let c = 1; c < firstRow.length; c++) {
-  const rawValue = firstRow[c];
-
-  let date = "";
-
-  /*
-    IMPORTANT:
-    Spreadsheet date headers must be treated as calendar dates.
-    Do not allow timezone conversion to move the date backward.
-  */
-
-  if (
-    rawValue instanceof Date &&
-    !Number.isNaN(rawValue.getTime())
-  ) {
-    /*
-      Same fix as normalizeDateValue(): XLSX gives us a
-      Date anchored to UTC midnight, so we must read it
-      back with UTC getters, not local ones.
-    */
-    date = toISODate(
-      rawValue.getUTCFullYear(),
-      rawValue.getUTCMonth() + 1,
-      rawValue.getUTCDate()
-    );
-  } else {
-    date = normalizeDateValue(rawValue);
-  }
-
-  if (date) {
-    dateStarts.push({
-      c,
-      date
-    });
-  }
-}
-
-console.log(
-  "DATE STARTS:",
-  dateStarts.map(x => ({
-    column: x.c,
-    date: x.date
-  }))
-);
-        console.log("========== DATE DEBUG ==========");
-
-dateStarts.forEach(d => {
-  console.log(
-    `DATE: ${d.date}`,
-    `COLUMN: ${d.c}`,
-    `ROW0: ${rows[0]?.[d.c]}`,
-    `ROW1: ${rows[1]?.[d.c]}`,
-    `ROW2: ${rows[2]?.[d.c]}`
-  );
-});
-
-console.log("================================");
-
-console.log("DATE STARTS:", dateStarts);
+        // A project code in this sheet never contains a space (they're all
+        // underscore_separated) and is never a long sentence. This filters
+        // out stray notes typed into a project cell by mistake, without
+        // needing to hardcode any specific note text.
+        function looksLikeProjectName(text) {
+          if (!text) return false;
+          if (text.length > 60) return false;
+          if (/\s/.test(text)) return false;
+          return true;
+        }
 
         const records = [];
         const names = [];
 
-        for (let r = 1; r < rows.length; r++) {
-          const name = rows[r]?.[0];
-          if (!name) continue;
+        // Import every tab in the workbook (e.g. one tab per month) and
+        // combine them into one dataset, instead of only reading the first.
+        wb.SheetNames.forEach(sheetName => {
+          const ws = wb.Sheets[sheetName];
+          const rows = XLSX.utils.sheet_to_json(ws, {
+            header: 1,
+            defval: null,
+            raw: true
+          });
 
-          const cleanName = String(name).trim();
-          if (!names.includes(cleanName)) names.push(cleanName);
+          const dateStarts = [];
+          const firstRow = rows[0] || [];
 
-          for (const d of dateStarts) {
-            const project = rows[r]?.[d.c];
-            const type = rows[r]?.[d.c + 1];
-            const worked = rows[r]?.[d.c + 2];
-            const link = rows[r]?.[d.c + 3];
+          for (let c = 1; c < firstRow.length; c++) {
+            const rawValue = firstRow[c];
+            let date = "";
 
-            console.log("IMPORT CHECK:", {
-  date: d.date,
-  name: cleanName,
-  project,
-  type,
-  worked,
-  link
-});
+            /*
+              IMPORTANT:
+              Spreadsheet date headers must be treated as calendar dates.
+              Do not allow timezone conversion to move the date backward.
+            */
+            if (rawValue instanceof Date && !Number.isNaN(rawValue.getTime())) {
+              // Same fix as normalizeDateValue(): XLSX gives us a Date
+              // anchored to UTC midnight, so read it back with UTC getters.
+              date = toISODate(
+                rawValue.getUTCFullYear(),
+                rawValue.getUTCMonth() + 1,
+                rawValue.getUTCDate()
+              );
+            } else {
+              date = normalizeDateValue(rawValue);
+            }
 
-            if (project == null && type == null && worked == null && link == null) continue;
-
-            const ps = String(project ?? "").split("\n");
-            const ts = String(type ?? "").split("\n");
-            const nums = String(worked ?? "").split("\n");
-            const ls = String(link ?? "").split("\n");
-
-            ps.forEach((p, i) => {
-              const text = p.trim();
-              if (!text) return;
-              const raw = nums[i] ?? nums[nums.length - 1] ?? "";
-              const n = parseNumber(raw);
-
-              records.push({
-                id: `${d.date}-${cleanName}-${records.length}`,
-                date: d.date,
-                name: cleanName,
-                project: text,
-                type: (ts[i] ?? ts[ts.length - 1] ?? "").trim(),
-                worked: n,
-                link: (ls[i] ?? ls[ls.length - 1] ?? "").trim()
-              });
-            });
+            if (date) dateStarts.push({ c, date });
           }
-        }
+
+          for (let r = 1; r < rows.length; r++) {
+            const name = rows[r]?.[0];
+            if (!name) continue;
+
+            const cleanName = String(name).trim();
+            if (!names.includes(cleanName)) names.push(cleanName);
+
+            for (const d of dateStarts) {
+              const project = rows[r]?.[d.c];
+              const type = rows[r]?.[d.c + 1];
+              const worked = rows[r]?.[d.c + 2];
+              const link = rows[r]?.[d.c + 3];
+
+              if (project == null && type == null && worked == null && link == null) continue;
+
+              const ps = String(project ?? "").split("\n");
+              const ts = String(type ?? "").split("\n");
+              const nums = String(worked ?? "").split("\n");
+              const ls = String(link ?? "").split("\n");
+
+              ps.forEach((p, i) => {
+                const text = p.trim();
+                if (!text) return;
+
+                const isPlaceholder = ["Saturday", "Sunday", "On Leave", "Leave", "Holiday"].includes(text);
+                if (!isPlaceholder && !looksLikeProjectName(text)) return;
+
+                const raw = nums[i] ?? nums[nums.length - 1] ?? "";
+                const n = parseNumber(raw);
+
+                records.push({
+                  id: `${d.date}-${cleanName}-${records.length}`,
+                  date: d.date,
+                  name: cleanName,
+                  project: text,
+                  type: (ts[i] ?? ts[ts.length - 1] ?? "").trim(),
+                  worked: n,
+                  link: (ls[i] ?? ls[ls.length - 1] ?? "").trim()
+                });
+              });
+            }
+          }
+        });
 
         const workDates = [...new Set(records.map(x => x.date).filter(Boolean))].sort();
         const today = workDates[workDates.length - 1] || new Date().toISOString().slice(0, 10);
