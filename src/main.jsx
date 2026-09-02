@@ -41,9 +41,11 @@ function getProjectStatus(total, completed, remaining) {
 }
 
 function getProjectStats(project) {
+  // "total" is scope of work (Total Images). "target" is a separate,
+  // unrelated number (Daily Target) and must never be used as a total.
   const total = Math.max(
     0,
-    Number(project.target ?? project.total) || 0
+    Number(project.totalImages ?? project.total) || 0
   );
 
   let completed;
@@ -128,11 +130,11 @@ function loadData() {
         ? saved.projects.map(p => {
             const s = getProjectStats(p);
 
+            // Keep p.target (Daily Target) exactly as saved — it is a
+            // separate number from Total Images and must not be touched here.
             return {
               ...p,
-              ...s,
-              target: s.total,
-              total: s.total
+              ...s
             };
           })
         : seed.projects,
@@ -1264,7 +1266,6 @@ function DashboardApp({ session, profile, onSignOut }) {
       const remaining = Math.max(0, totalImages - completed);
 
       next.projects = [
-        ...data.projects,
         {
           id: Date.now(),
           name,
@@ -1275,7 +1276,8 @@ function DashboardApp({ session, profile, onSignOut }) {
           remaining,
           status: getProjectStatus(totalImages, completed, remaining),
           deadline: f.get("deadline") || ""
-        }
+        },
+        ...data.projects
       ];
     } else {
       next.issues = [
@@ -4101,38 +4103,68 @@ console.log("DATE STARTS:", dateStarts);
           };
         });
 
+        // Completed is summed across the WHOLE imported history (all dates),
+        // not just the latest day, so status reflects true overall progress.
+        const workRecords = records.filter(
+          x => !["Saturday", "Sunday", "On Leave"].includes(x.project)
+        );
+
+        const originalIndex = new Map(
+          (data.projects || []).map((p, i) => [String(p.name).toLowerCase(), i])
+        );
+
         const projectMap = {};
         Object.entries(projectTargets).forEach(([name, target]) => {
           const existing = data.projects?.find(p => String(p.name).toLowerCase() === String(name).toLowerCase());
           projectMap[name] = {
             completed: 0,
             target,
-            totalImages: Math.max(0, Number(existing?.totalImages ?? existing?.total ?? existing?.target) || target),
-            deadline: existing?.deadline || ""
+            totalImages: Math.max(0, Number(existing?.totalImages ?? existing?.total) || target),
+            deadline: existing?.deadline || "",
+            id: existing?.id
           };
         });
 
-        todayRows.forEach(x => {
+        workRecords.forEach(x => {
           const configuredName = getConfiguredProjectName(x.project);
           if (!configuredName) return;
           if (!projectMap[configuredName]) {
+            const existing = data.projects?.find(
+              p => String(p.name).toLowerCase() === String(configuredName).toLowerCase()
+            );
             projectMap[configuredName] = {
               completed: 0,
-              target: projectTargets[configuredName] || 0,
-              totalImages: Math.max(0, Number(projectTargets[configuredName]) || 0),
-              deadline: ""
+              target: projectTargets[configuredName] || existing?.target || 0,
+              totalImages: Math.max(
+                0,
+                Number(existing?.totalImages ?? existing?.total ?? projectTargets[configuredName]) || 0
+              ),
+              deadline: existing?.deadline || "",
+              id: existing?.id
             };
           }
           projectMap[configuredName].completed += Number(x.worked) || 0;
         });
 
-        const projects = Object.entries(projectMap).map(([name, v], i) => {
+        // Local projects this import never touched (not a known target,
+        // not seen anywhere in the sheet) are carried over unchanged
+        // instead of being silently dropped from the list.
+        const touchedNames = new Set(Object.keys(projectMap).map(n => n.toLowerCase()));
+        const untouchedExisting = (data.projects || []).filter(
+          p => !touchedNames.has(String(p.name).toLowerCase())
+        );
+
+        let nextId = Date.now();
+        const newlyDiscovered = [];
+        const existingTouched = [];
+
+        Object.entries(projectMap).forEach(([name, v]) => {
           const target = Number(v.target) || 0;
           const totalImages = Math.max(0, Number(v.totalImages ?? target) || 0);
           const completed = Math.max(0, Math.min(totalImages, Number(v.completed) || 0));
           const remaining = Math.max(0, totalImages - completed);
-          return {
-            id: 2000 + i,
+          const project = {
+            id: v.id || nextId++,
             name,
             target,
             totalImages,
@@ -4142,7 +4174,19 @@ console.log("DATE STARTS:", dateStarts);
             status: getProjectStatus(totalImages, completed, remaining),
             deadline: v.deadline || ""
           };
+          if (v.id) existingTouched.push(project);
+          else newlyDiscovered.push(project);
         });
+
+        // Keep previously-known projects in their original relative order;
+        // brand-new projects discovered by this import go to the top.
+        const existingCombined = [...existingTouched, ...untouchedExisting].sort(
+          (a, b) =>
+            (originalIndex.get(String(a.name).toLowerCase()) ?? 0) -
+            (originalIndex.get(String(b.name).toLowerCase()) ?? 0)
+        );
+
+        const projects = [...newlyDiscovered, ...existingCombined];
 
         update({
           ...data,
