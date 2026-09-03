@@ -174,6 +174,75 @@ function saveData(data) {
 
 
 /* =========================================================
+   PREFERENCES (device-local, not synced with the team)
+   General Settings live here — how THIS browser likes to view
+   the dashboard, not shared facts about the team.
+========================================================= */
+
+const PREFS_KEY = "annotatepro-prefs";
+
+const defaultPrefs = {
+  landingPage: "dashboard",
+  reportRangeMode: "lastImportedWeek" // or "thisWeek"
+};
+
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    return raw ? { ...defaultPrefs, ...JSON.parse(raw) } : { ...defaultPrefs };
+  } catch {
+    return { ...defaultPrefs };
+  }
+}
+
+function savePrefs(prefs) {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // localStorage unavailable — preferences just won't persist.
+  }
+}
+
+
+/* =========================================================
+   ACTIVITY LOG (device-local only)
+   A simple on-device record of notable actions, for the
+   Security panel. Not synced or shared across devices/users.
+========================================================= */
+
+const ACTIVITY_KEY = "annotatepro-activity";
+const ACTIVITY_LIMIT = 50;
+
+function logActivity(message) {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    list.unshift({ id: Date.now(), message, at: new Date().toISOString() });
+    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0, ACTIVITY_LIMIT)));
+  } catch {
+    // localStorage unavailable — activity just won't be recorded.
+  }
+}
+
+function getActivityLog() {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function clearActivityLog() {
+  try {
+    localStorage.removeItem(ACTIVITY_KEY);
+  } catch {
+    // no-op
+  }
+}
+
+
+/* =========================================================
    PROJECT NAME
 ========================================================= */
 
@@ -1081,7 +1150,7 @@ function App() {
 function DashboardApp({ session, profile, onSignOut }) {
   const [data, setData] = useState(loadData);
   const [dataReady, setDataReady] = useState(!isSupabaseConfigured);
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState(() => loadPrefs().landingPage || "dashboard");
   const [query, setQuery] = useState("");
   const [sidebar, setSidebar] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -1300,6 +1369,13 @@ function DashboardApp({ session, profile, onSignOut }) {
     update(next);
     setShowAdd(false);
     notify("Saved successfully");
+    logActivity(
+      addType === "team"
+        ? `Added team member "${f.get("name")}"`
+        : addType === "project"
+        ? `Added project "${f.get("name")}"`
+        : `Logged issue "${f.get("type")}" on ${f.get("project")}`
+    );
   }
 
   function editProject(e) {
@@ -1333,6 +1409,7 @@ function DashboardApp({ session, profile, onSignOut }) {
     update({ ...data, projects });
     setEditingProject(null);
     notify("Project updated successfully");
+    logActivity(`Updated project "${name}"`);
   }
 
   function remove(kind, id) {
@@ -1340,12 +1417,15 @@ function DashboardApp({ session, profile, onSignOut }) {
     if (kind === "issues" && !canManageIssues) return notify("Only Admin or Team Lead can delete issues.");
     if (!confirm("Delete this record?")) return;
 
+    const removedName = data[kind].find(x => x.id === id)?.name || data[kind].find(x => x.id === id)?.type;
+
     update({
       ...data,
       [kind]: data[kind].filter(x => x.id !== id)
     });
 
     notify("Deleted");
+    logActivity(`Deleted ${kind.slice(0, -1)}${removedName ? ` "${removedName}"` : ""}`);
   }
 
   function saveTeamMember(formData, editing) {
@@ -1389,6 +1469,35 @@ function DashboardApp({ session, profile, onSignOut }) {
 
     update(next);
     notify("Team member deleted");
+    logActivity(`Deleted team member "${name}"`);
+  }
+
+  function clearImportedData() {
+    if (!canManageTeam) return notify("Only Admin or Team Lead can clear imported data.");
+    if (!confirm("Clear all imported sheet data and reset project completed counts? This cannot be undone.")) return;
+
+    const projects = data.projects.map(p => {
+      const totalImages = Math.max(0, Number(p.totalImages ?? p.total) || 0);
+      return {
+        ...p,
+        completed: 0,
+        remaining: totalImages,
+        status: getProjectStatus(totalImages, 0, totalImages)
+      };
+    });
+
+    update({
+      ...data,
+      sheetRecords: [],
+      accuracyRecords: [],
+      sheetFile: "",
+      accuracyFile: "",
+      sheetLastSync: "",
+      projects
+    });
+
+    notify("Imported data cleared");
+    logActivity("Cleared imported sheet data and reset project completed counts");
   }
 
   function exportData() {
@@ -1418,11 +1527,12 @@ function DashboardApp({ session, profile, onSignOut }) {
         if (parsed.team && parsed.projects && parsed.issues) {
           const projects = parsed.projects.map(p => {
             const s = getProjectStats(p);
+            // Keep p.target (Daily Target) exactly as saved in the backup —
+            // it's a separate number from Total Images and must not be
+            // overwritten here.
             return {
               ...p,
-              ...s,
-              target: s.total,
-              total: s.total
+              ...s
             };
           });
 
@@ -1608,10 +1718,15 @@ function DashboardApp({ session, profile, onSignOut }) {
             <SettingsPage
               exportData={exportData}
               importData={importData}
+              clearImportedData={clearImportedData}
               role={role}
               storageOnline={isSupabaseConfigured}
               email={session?.user?.email}
               onSignOut={onSignOut}
+              canManage={canManageTeam}
+              notify={notify}
+              myId={profile?.id}
+              isAdmin={role === "admin"}
             />
           )}
 
@@ -2777,7 +2892,8 @@ function buildAttendanceMatrix(data, range) {
 
 function Attendance({ data, update, canManage, notify }) {
   const latestDate = getLatestImportedDate(data);
-  const defaultRange = getWeekRange(latestDate || getTodayISO());
+  const anchorDate = loadPrefs().reportRangeMode === "thisWeek" ? getTodayISO() : (latestDate || getTodayISO());
+  const defaultRange = getWeekRange(anchorDate);
 
   const [filter, setFilter] = useState({
     mode: "range",
@@ -3705,15 +3821,16 @@ function buildProductivityReport(data, range) {
 
 function Reports({ data }) {
   const latestDate = getLatestImportedDate(data);
+  const anchorDate = loadPrefs().reportRangeMode === "thisWeek" ? getTodayISO() : latestDate;
 
   const [reportType, setReportType] = useState("daily");
-  const [singleDate, setSingleDate] = useState(latestDate);
-  const [weekDate, setWeekDate] = useState(latestDate);
-  const [monthValue, setMonthValue] = useState(latestDate ? latestDate.slice(0, 7) : "");
+  const [singleDate, setSingleDate] = useState(anchorDate);
+  const [weekDate, setWeekDate] = useState(anchorDate);
+  const [monthValue, setMonthValue] = useState(anchorDate ? anchorDate.slice(0, 7) : "");
   const [customFilter, setCustomFilter] = useState(() => ({
     mode: "range",
-    start: latestDate,
-    end: latestDate
+    start: anchorDate,
+    end: anchorDate
   }));
   const [projectFilter, setProjectFilter] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
@@ -4111,84 +4228,52 @@ function SheetImport({ data, update, notify }) {
           x => !["Saturday", "Sunday", "On Leave"].includes(x.project)
         );
 
-        const originalIndex = new Map(
-          (data.projects || []).map((p, i) => [String(p.name).toLowerCase(), i])
-        );
-
+        // Only projects you've already created get their stats updated from
+        // the sheet — nothing new is auto-created here. Daily Target, Total
+        // Images and Deadline are never touched by import; only Completed
+        // and Status get recalculated from the sheet data.
         const projectMap = {};
-        Object.entries(projectTargets).forEach(([name, target]) => {
-          const existing = data.projects?.find(p => String(p.name).toLowerCase() === String(name).toLowerCase());
-          projectMap[name] = {
+        (data.projects || []).forEach(p => {
+          projectMap[String(p.name).toLowerCase()] = {
+            name: p.name,
+            id: p.id,
             completed: 0,
-            target,
-            totalImages: Math.max(0, Number(existing?.totalImages ?? existing?.total) || target),
-            deadline: existing?.deadline || "",
-            id: existing?.id
+            target: Number(p.target) || 0,
+            totalImages: Math.max(0, Number(p.totalImages ?? p.total) || 0),
+            deadline: p.deadline || ""
           };
         });
+
+        const unmatchedProjectNames = new Set();
 
         workRecords.forEach(x => {
           const configuredName = getConfiguredProjectName(x.project);
           if (!configuredName) return;
-          if (!projectMap[configuredName]) {
-            const existing = data.projects?.find(
-              p => String(p.name).toLowerCase() === String(configuredName).toLowerCase()
-            );
-            projectMap[configuredName] = {
-              completed: 0,
-              target: projectTargets[configuredName] || existing?.target || 0,
-              totalImages: Math.max(
-                0,
-                Number(existing?.totalImages ?? existing?.total ?? projectTargets[configuredName]) || 0
-              ),
-              deadline: existing?.deadline || "",
-              id: existing?.id
-            };
+
+          const key = configuredName.toLowerCase();
+          if (!projectMap[key]) {
+            unmatchedProjectNames.add(configuredName);
+            return; // no matching project — skip, don't auto-create
           }
-          projectMap[configuredName].completed += Number(x.worked) || 0;
+          projectMap[key].completed += Number(x.worked) || 0;
         });
 
-        // Local projects this import never touched (not a known target,
-        // not seen anywhere in the sheet) are carried over unchanged
-        // instead of being silently dropped from the list.
-        const touchedNames = new Set(Object.keys(projectMap).map(n => n.toLowerCase()));
-        const untouchedExisting = (data.projects || []).filter(
-          p => !touchedNames.has(String(p.name).toLowerCase())
-        );
-
-        let nextId = Date.now();
-        const newlyDiscovered = [];
-        const existingTouched = [];
-
-        Object.entries(projectMap).forEach(([name, v]) => {
-          const target = Number(v.target) || 0;
-          const totalImages = Math.max(0, Number(v.totalImages ?? target) || 0);
+        const projects = Object.values(projectMap).map(v => {
+          const totalImages = Math.max(0, Number(v.totalImages) || 0);
           const completed = Math.max(0, Math.min(totalImages, Number(v.completed) || 0));
           const remaining = Math.max(0, totalImages - completed);
-          const project = {
-            id: v.id || nextId++,
-            name,
-            target,
+          return {
+            id: v.id,
+            name: v.name,
+            target: v.target,
             totalImages,
             total: totalImages,
             completed,
             remaining,
             status: getProjectStatus(totalImages, completed, remaining),
-            deadline: v.deadline || ""
+            deadline: v.deadline
           };
-          if (v.id) existingTouched.push(project);
-          else newlyDiscovered.push(project);
         });
-
-        // Keep previously-known projects in their original relative order;
-        // brand-new projects discovered by this import go to the top.
-        const existingCombined = [...existingTouched, ...untouchedExisting].sort(
-          (a, b) =>
-            (originalIndex.get(String(a.name).toLowerCase()) ?? 0) -
-            (originalIndex.get(String(b.name).toLowerCase()) ?? 0)
-        );
-
-        const projects = [...newlyDiscovered, ...existingCombined];
 
         update({
           ...data,
@@ -4200,7 +4285,17 @@ function SheetImport({ data, update, notify }) {
         });
 
         setPreview(records.slice(0, 25));
-        notify(`Imported ${records.length} work records`);
+        logActivity(`Imported sheet "${file.name}" (${records.length} work records)`);
+
+        if (unmatchedProjectNames.size) {
+          const names = [...unmatchedProjectNames].slice(0, 5).join(", ");
+          const more = unmatchedProjectNames.size > 5 ? ` and ${unmatchedProjectNames.size - 5} more` : "";
+          notify(
+            `Imported ${records.length} work records. Not linked to a project yet: ${names}${more}. Add them on the Projects page if you want their targets tracked.`
+          );
+        } else {
+          notify(`Imported ${records.length} work records`);
+        }
       } catch (err) {
         console.error(err);
         alert("Could not read this Excel file. Please use .xlsx format.");
@@ -4358,6 +4453,7 @@ function SheetImport({ data, update, notify }) {
 
         setAccuracyPreview(records.slice(0, 25));
         notify(`Imported Accuracy Report for ${records.length} team members`);
+        logActivity(`Imported Accuracy Report "${file.name}" (${records.length} team members)`);
       } catch (err) {
         console.error(err);
         alert("Could not read this Accuracy Report. Please use .xlsx format and check the column names.");
@@ -4533,12 +4629,84 @@ function SheetImport({ data, update, notify }) {
 /* =========================================================
    SETTINGS / PAGE / MODAL
 ========================================================= */
-function SettingsPage({ exportData, importData, role, storageOnline, email, onSignOut }) {
+function SettingsPage({
+  exportData,
+  importData,
+  clearImportedData,
+  role,
+  storageOnline,
+  email,
+  onSignOut,
+  canManage,
+  notify,
+  myId,
+  isAdmin
+}) {
+  const [prefs, setPrefs] = useState(loadPrefs);
+  const [activity, setActivity] = useState(getActivityLog);
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+
+  function updatePref(key, value) {
+    const next = { ...prefs, [key]: value };
+    setPrefs(next);
+    savePrefs(next);
+  }
+
+  function handleClearActivity() {
+    if (!confirm("Clear this device's activity history? This cannot be undone.")) return;
+    clearActivityLog();
+    setActivity([]);
+  }
+
   return (
     <Page
       title="Settings"
-      subtitle="Manage dashboard data and backups."
+      subtitle="Manage how the dashboard looks, your data, and account security."
     >
+      <Panel title="General">
+        <div className="settings-row">
+          <div>
+            <b>Landing page</b>
+            <p>Which page opens first when you log in. Applies next time you open the dashboard.</p>
+          </div>
+
+          <select
+            value={prefs.landingPage}
+            onChange={e => updatePref("landingPage", e.target.value)}
+          >
+            <option value="dashboard">Dashboard</option>
+            <option value="team">Team</option>
+            <option value="attendance">Attendance</option>
+            <option value="projects">Projects</option>
+            <option value="qa">QA & Reviews</option>
+            <option value="issues">Issues</option>
+            <option value="analytics">Analytics</option>
+            <option value="reports">Reports</option>
+          </select>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <b>Default report range</b>
+            <p>What Reports and Attendance use as the starting date range before you pick one yourself.</p>
+          </div>
+
+          <select
+            value={prefs.reportRangeMode}
+            onChange={e => updatePref("reportRangeMode", e.target.value)}
+          >
+            <option value="lastImportedWeek">Latest imported week</option>
+            <option value="thisWeek">This calendar week</option>
+          </select>
+        </div>
+
+        <p className="muted settings-note">
+          These are personal display preferences saved on this browser only — they don't change what your team sees.
+        </p>
+      </Panel>
+
+      {isAdmin && <UserAccessPanel myId={myId} notify={notify} />}
+
       <Panel title="Data management">
         <div className="settings-row">
           <div>
@@ -4572,6 +4740,21 @@ function SettingsPage({ exportData, importData, role, storageOnline, email, onSi
 
         <div className="settings-row">
           <div>
+            <b>Clear imported data</b>
+            <p>Removes all imported sheet and accuracy records, and resets every project's Completed count to 0. Daily Target, Total Images and Deadline are kept as-is.</p>
+          </div>
+
+          <button
+            className="secondary danger"
+            onClick={() => (canManage ? clearImportedData() : notify("Only Admin or Team Lead can clear imported data."))}
+          >
+            <Trash2 size={17} />
+            Clear
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div>
             <b>Storage</b>
             <p>{storageOnline ? "Dashboard data is connected to Supabase online storage." : "Supabase is not configured, so the dashboard is using localStorage."}</p>
           </div>
@@ -4581,7 +4764,9 @@ function SettingsPage({ exportData, importData, role, storageOnline, email, onSi
             {storageOnline ? "Online" : "Local"}
           </span>
         </div>
+      </Panel>
 
+      <Panel title="Security">
         <div className="settings-row">
           <div>
             <b>Signed-in account</b>
@@ -4593,8 +4778,207 @@ function SettingsPage({ exportData, importData, role, storageOnline, email, onSi
             </button>
           )}
         </div>
+
+        {storageOnline && (
+          <div className="settings-row">
+            <div>
+              <b>Change password</b>
+              <p>Updates the password for your own account only.</p>
+            </div>
+            <button className="secondary" onClick={() => setShowPasswordForm(v => !v)}>
+              <LockKeyhole size={17} /> {showPasswordForm ? "Cancel" : "Change"}
+            </button>
+          </div>
+        )}
+
+        {showPasswordForm && (
+          <ChangePasswordForm notify={notify} onDone={() => setShowPasswordForm(false)} />
+        )}
+
+        <div className="settings-row settings-row-top">
+          <div>
+            <b>Activity history</b>
+            <p>A record of notable actions on this device only — not synced or shared with your team.</p>
+          </div>
+
+          {activity.length > 0 && (
+            <button className="link-btn" onClick={handleClearActivity}>
+              Clear
+            </button>
+          )}
+        </div>
+
+        {activity.length === 0 ? (
+          <p className="muted">No activity recorded on this device yet.</p>
+        ) : (
+          <ul className="activity-list">
+            {activity.map(a => (
+              <li key={a.id}>
+                <span>{a.message}</span>
+                <small>{new Date(a.at).toLocaleString()}</small>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="settings-row-top">
+          <b style={{ fontSize: 13 }}>What each role can do</b>
+          <div className="role-reference">
+            <div><b>Admin</b><span>Everything, including managing users and roles.</span></div>
+            <div><b>Team Lead</b><span>Manage team, projects, issues, imports and holidays.</span></div>
+            <div><b>Member</b><span>View-only access across the dashboard.</span></div>
+          </div>
+        </div>
       </Panel>
     </Page>
+  );
+}
+
+function UserAccessPanel({ myId, notify }) {
+  const [users, setUsers] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [savingId, setSavingId] = useState(null);
+
+  useEffect(() => {
+    if (!supabase) {
+      setUsers([]);
+      return undefined;
+    }
+
+    let active = true;
+
+    async function load() {
+      const { data: rows, error } = await supabase.from("profiles").select("*");
+      if (!active) return;
+
+      if (error) {
+        console.error("Could not load user list", error);
+        setLoadError("Could not load the user list. Your Supabase policies may not allow Admins to read all profiles.");
+        setUsers([]);
+        return;
+      }
+
+      setUsers(rows || []);
+    }
+
+    load();
+    return () => { active = false; };
+  }, []);
+
+  async function changeRole(userId, newRole, oldRole) {
+    if (newRole === oldRole) return;
+    setSavingId(userId);
+
+    const { error } = await supabase.from("profiles").update({ role: newRole }).eq("id", userId);
+    setSavingId(null);
+
+    if (error) {
+      console.error("Could not update role", error);
+      notify("Could not update that user's role. Check your Supabase policies allow this.");
+      return;
+    }
+
+    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, role: newRole } : u)));
+    notify("Role updated");
+    logActivity(`Changed a team member's role to ${roleLabel(newRole)}`);
+  }
+
+  return (
+    <Panel title="User & access">
+      <p className="muted settings-note">
+        New people sign up on the login screen — set their role here afterward. Admin can manage everything; Team Lead can manage team, projects, issues and imports; Member is view-only.
+      </p>
+
+      {users === null ? (
+        <p className="muted">Loading users…</p>
+      ) : loadError ? (
+        <p className="muted">{loadError}</p>
+      ) : users.length === 0 ? (
+        <p className="muted">No users found yet.</p>
+      ) : (
+        <ul className="user-list">
+          {users.map(u => {
+            const name = u.full_name || u.name || u.email || "Unnamed";
+            return (
+              <li key={u.id}>
+                <div className="user-list-identity">
+                  <div className="mini-avatar">{String(name).slice(0, 2).toUpperCase()}</div>
+                  <div>
+                    <b>{name}</b>
+                    <span>{u.email || u.id}</span>
+                  </div>
+                </div>
+
+                <select
+                  value={u.role || "member"}
+                  disabled={u.id === myId || savingId === u.id}
+                  onChange={e => changeRole(u.id, e.target.value, u.role)}
+                >
+                  <option value="admin">Admin</option>
+                  <option value="team_lead">Team Lead</option>
+                  <option value="member">Member</option>
+                </select>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+function ChangePasswordForm({ notify, onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (password.length < 6) return notify("Password must be at least 6 characters.");
+    if (password !== confirm) return notify("Passwords don't match.");
+
+    setBusy(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setBusy(false);
+
+    if (error) {
+      notify(`Could not change password: ${error.message}`);
+      return;
+    }
+
+    notify("Password updated");
+    logActivity("Changed account password");
+    setPassword("");
+    setConfirm("");
+    onDone();
+  }
+
+  return (
+    <form className="password-form" onSubmit={submit}>
+      <label>
+        New password
+        <input
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          minLength={6}
+          required
+        />
+      </label>
+      <label>
+        Confirm new password
+        <input
+          type="password"
+          value={confirm}
+          onChange={e => setConfirm(e.target.value)}
+          minLength={6}
+          required
+        />
+      </label>
+      <button className="primary" type="submit" disabled={busy}>
+        {busy ? "Saving…" : "Save new password"}
+      </button>
+    </form>
   );
 }
 
