@@ -1120,6 +1120,23 @@ function App() {
         full_name: row?.full_name || row?.name || fallbackName,
         role: normalizedRole
       });
+
+      // Self-heal missing emails: since every user logs in themselves,
+      // each login is a safe chance to record their own email on their
+      // own profile row (RLS already has to allow this — it's the same
+      // permission as updating your own name/role would need). This is
+      // what lets User & access show a real email instead of a raw ID,
+      // without needing any admin-only backend access.
+      if (user.email && row?.email !== user.email) {
+        const { error: emailError } = await supabase
+          .from("profiles")
+          .update({ email: user.email })
+          .eq("id", user.id);
+
+        if (emailError) {
+          console.warn("Could not backfill email on profile", emailError);
+        }
+      }
     };
 
     loadProfile();
@@ -4899,13 +4916,14 @@ function UserAccessPanel({ myId, notify }) {
         <ul className="user-list">
           {users.map(u => {
             const name = u.full_name || u.name || u.email || "Unnamed";
+            const contact = u.email || u.user_email || u.contact_email || `ID ${String(u.id).slice(0, 8)}…`;
             return (
               <li key={u.id}>
                 <div className="user-list-identity">
                   <div className="mini-avatar">{String(name).slice(0, 2).toUpperCase()}</div>
                   <div>
                     <b>{name}</b>
-                    <span>{u.email || u.id}</span>
+                    <span>{contact}</span>
                   </div>
                 </div>
 
