@@ -390,3 +390,83 @@
   color: #4d586c;
 }
 .holiday-list li:last-child { border-bottom: 0; }
+
+/* Settings page additions */
+.settings-row select {
+  padding: 9px 11px;
+  border: 1px solid #dfe4eb;
+  border-radius: 8px;
+  outline: 0;
+  background: #fff;
+  font-size: 12px;
+  color: #172033;
+  min-width: 190px;
+}
+.settings-row select:focus { border-color: #786cf0; box-shadow: 0 0 0 3px #786cf018; }
+.settings-note { margin-top: 4px; }
+.settings-row-top { padding-top: 22px; }
+.secondary.danger { color: #d64d64; border-color: #f3d4da; }
+.secondary.danger:hover { background: #fff0f2; }
+
+.activity-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.activity-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f2f5;
+  font-size: 12px;
+  color: #4d586c;
+}
+.activity-list li:last-child { border-bottom: 0; }
+.activity-list small { color: #9099a9; white-space: nowrap; }
+
+/* User & access, password form, role reference */
+.user-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.user-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid #edf0f4;
+}
+.user-list li:last-child { border-bottom: 0; }
+.user-list-identity { display: flex; align-items: center; gap: 10px; }
+.user-list-identity b { display: block; font-size: 12.5px; }
+.user-list-identity span { display: block; font-size: 11px; color: #8c96a8; }
+.user-list select {
+  padding: 8px 10px;
+  border: 1px solid #dfe4eb;
+  border-radius: 8px;
+  font-size: 12px;
+  background: #fff;
+  color: #172033;
+}
+.user-list select:disabled { opacity: .55; cursor: not-allowed; }
+
+.password-form {
+  display: grid;
+  gap: 12px;
+  max-width: 320px;
+  padding: 16px 0;
+  border-bottom: 1px solid #edf0f4;
+}
+.password-form label { font-size: 11px; font-weight: 700; color: #596477; }
+.password-form input {
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid #dfe4eb;
+  border-radius: 8px;
+  margin-top: 6px;
+  outline: 0;
+  background: #fff;
+  font-size: 13px;
+}
+.password-form input:focus { border-color: #786cf0; box-shadow: 0 0 0 3px #786cf018; }
+.password-form button { justify-self: start; }
+
+.role-reference { display: grid; gap: 10px; margin-top: 10px; }
+.role-reference div { display: grid; grid-template-columns: 90px 1fr; gap: 6px; font-size: 11.5px; color: #4d586c; }
+.role-reference b { color: #293347; }
