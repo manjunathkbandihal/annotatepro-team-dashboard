@@ -628,3 +628,21 @@
   resize: vertical;
 }
 .modal textarea:focus { border-color: #786cf0; box-shadow: 0 0 0 3px #786cf018; }
+
+/* Quick date presets */
+.date-filter-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+.date-preset-btn {
+  background: #f8f9fc;
+  border: 1px solid #e5e9f0;
+  color: #4d586c;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 20px;
+}
+.date-preset-btn:hover { background: #f0eeff; color: #5e53d5; border-color: #d9d3ff; }
