@@ -672,29 +672,32 @@ function isDateInRange(date, range) {
    LATEST IMPORTED DATE
 ========================================================= */
 
+// The Daily Effort Sheet and Accuracy Report are two independent files on
+// their own schedules — their dates must never be blended into one "latest
+// date", or Attendance/productivity can end up anchored to a date that only
+// exists in the OTHER file and has no real work data at all.
 function getLatestImportedDate(data) {
-  const dates = [
-    // Only rows with real work count — a pre-filled "Saturday"/"Sunday"
-    // placeholder for a future date that hasn't happened yet must not
-    // get picked as the latest date.
-    ...(Array.isArray(data?.sheetRecords)
-      ? data.sheetRecords.filter(isWorkRow).map(x =>
-          normalizeDateValue(x.date)
-        )
-      : []),
-
-    ...(Array.isArray(data?.accuracyRecords)
-      ? data.accuracyRecords.map(x =>
-          normalizeDateValue(x.date)
-        )
-      : [])
-  ]
+  // Only rows with real work count — a pre-filled "Saturday"/"Sunday"
+  // placeholder for a future date that hasn't happened yet must not
+  // get picked as the latest date.
+  const dates = (Array.isArray(data?.sheetRecords) ? data.sheetRecords : [])
+    .filter(isWorkRow)
+    .map(x => normalizeDateValue(x.date))
     .filter(Boolean)
     .sort();
 
   return dates.length
     ? dates[dates.length - 1]
     : "";
+}
+
+function getLatestAccuracyDate(data) {
+  const dates = (Array.isArray(data?.accuracyRecords) ? data.accuracyRecords : [])
+    .map(x => normalizeDateValue(x.date))
+    .filter(Boolean)
+    .sort();
+
+  return dates.length ? dates[dates.length - 1] : "";
 }
 
 
@@ -3868,7 +3871,7 @@ function ProjectProfileModal({ project, data, onClose }) {
    QA
 ========================================================= */
 function QA({ data }) {
-  const latestDate = getLatestImportedDate(data);
+  const latestDate = getLatestAccuracyDate(data);
   const [period, setPeriod] = useState(() => ({
     mode: "single",
     start: latestDate,
@@ -4958,7 +4961,9 @@ const WORK_TYPE_LABELS = {
   project: "Project-wise Report",
   employee: "Employee-wise Report",
   qa: "QA Report",
-  productivity: "Productivity Report"
+  productivity: "Productivity Report",
+  attendance: "Attendance Report",
+  issues: "Issues Report"
 };
 
 // Monday-Sunday week containing the given YYYY-MM-DD date.
@@ -5237,6 +5242,86 @@ function buildProductivityReport(data, range) {
   return { summary, detail: timeReport.detail };
 }
 
+function buildAttendanceReport(data, range) {
+  const matrix = buildAttendanceMatrix(data, range);
+
+  const summary = matrix.rows
+    .map(row => {
+      const counts = { Present: 0, Absent: 0, Leave: 0, "Half Day": 0, "Week Off": 0, Holiday: 0 };
+      row.cells.forEach(c => { counts[c.status] = (counts[c.status] || 0) + 1; });
+      const workingSlots = row.cells.length - counts["Week Off"] - counts.Holiday;
+      const presentPct = workingSlots
+        ? Math.round(((counts.Present + counts["Half Day"] * 0.5) / workingSlots) * 100)
+        : 0;
+      return {
+        Name: row.name,
+        Present: counts.Present,
+        Absent: counts.Absent,
+        Leave: counts.Leave,
+        "Half Day": counts["Half Day"],
+        "Week Off": counts["Week Off"],
+        Holiday: counts.Holiday,
+        "Attendance %": presentPct
+      };
+    })
+    .sort((a, b) => b["Attendance %"] - a["Attendance %"]);
+
+  const detail = [];
+  matrix.rows.forEach(row => {
+    row.cells.forEach(c => {
+      detail.push({ Date: c.date, Name: row.name, Status: c.status });
+    });
+  });
+  detail.sort((a, b) => (a.Date < b.Date ? -1 : a.Date > b.Date ? 1 : a.Name < b.Name ? -1 : 1));
+
+  return { summary, detail };
+}
+
+function buildIssuesReport(data, range) {
+  const rows = (Array.isArray(data.issues) ? data.issues : [])
+    .filter(x => isDateInRange(x.date, range));
+
+  const byProject = new Map();
+  rows.forEach(x => {
+    const key = x.project || "Unknown";
+    if (!byProject.has(key)) byProject.set(key, { project: key, open: 0, inProgress: 0, resolved: 0, closed: 0, total: 0 });
+    const entry = byProject.get(key);
+    entry.total += 1;
+    if (x.status === "Open") entry.open += 1;
+    else if (x.status === "In Progress") entry.inProgress += 1;
+    else if (x.status === "Resolved") entry.resolved += 1;
+    else if (x.status === "Closed") entry.closed += 1;
+  });
+
+  const summary = [...byProject.values()]
+    .map(x => ({
+      Project: x.project,
+      Open: x.open,
+      "In Progress": x.inProgress,
+      Resolved: x.resolved,
+      Closed: x.closed,
+      Total: x.total
+    }))
+    .sort((a, b) => b.Total - a.Total);
+
+  const detail = rows
+    .map(x => ({
+      Date: x.date,
+      Issue: x.type,
+      Project: x.project,
+      Employee: x.owner,
+      "Assigned To": x.assignedTo || "",
+      Priority: x.severity,
+      Status: x.status,
+      "Due Date": x.dueDate || "",
+      "Resolved Date": x.resolvedDate || "",
+      Resolution: x.resolution || ""
+    }))
+    .sort((a, b) => (a.Date < b.Date ? -1 : a.Date > b.Date ? 1 : 1));
+
+  return { summary, detail };
+}
+
 function Reports({ data }) {
   const latestDate = getLatestImportedDate(data);
   const anchorDate = loadPrefs().reportRangeMode === "thisWeek" ? getTodayISO() : latestDate;
@@ -5282,6 +5367,10 @@ function Reports({ data }) {
         return buildQAReportRows(data, range);
       case "productivity":
         return buildProductivityReport(data, range);
+      case "attendance":
+        return buildAttendanceReport(data, range);
+      case "issues":
+        return buildIssuesReport(data, range);
       default:
         return buildTimeReport(data, range);
     }
@@ -5313,6 +5402,8 @@ function Reports({ data }) {
               <option value="employee">Employee-wise report</option>
               <option value="qa">QA report</option>
               <option value="productivity">Productivity report</option>
+              <option value="attendance">Attendance report</option>
+              <option value="issues">Issues report</option>
             </select>
           </label>
 
@@ -5337,7 +5428,7 @@ function Reports({ data }) {
             </label>
           )}
 
-          {["custom", "project", "employee", "qa", "productivity"].includes(reportType) && (
+          {["custom", "project", "employee", "qa", "productivity", "attendance", "issues"].includes(reportType) && (
             <DateFilter value={customFilter} onChange={setCustomFilter} data={data} />
           )}
 
@@ -5402,7 +5493,7 @@ function Reports({ data }) {
 
         <Panel title={`${reportLabel} — ${report.summary.length} row${report.summary.length === 1 ? "" : "s"}`}>
           {!range.start || !range.end ? (
-            <p className="muted">Select a date{["custom", "project", "employee", "qa", "productivity"].includes(reportType) ? " range" : ""} to build the report.</p>
+            <p className="muted">Select a date{["custom", "project", "employee", "qa", "productivity", "attendance", "issues"].includes(reportType) ? " range" : ""} to build the report.</p>
           ) : !report.summary.length ? (
             <p className="muted">No data found for <b>{range.label}</b>.</p>
           ) : (
