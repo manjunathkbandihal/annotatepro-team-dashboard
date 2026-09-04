@@ -791,6 +791,37 @@ function getNotifications(data) {
    DATE FILTER
 ========================================================= */
 
+function getPresetRange(key) {
+  const today = getTodayISO();
+  if (key === "today") return { start: today, end: today };
+
+  if (key === "yesterday") {
+    const d = dateKeyToLocalDate(today);
+    d.setDate(d.getDate() - 1);
+    const iso = toISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    return { start: iso, end: iso };
+  }
+
+  if (key === "thisWeek") return getWeekRange(today);
+
+  if (key === "lastWeek") {
+    const d = dateKeyToLocalDate(today);
+    d.setDate(d.getDate() - 7);
+    return getWeekRange(toISODate(d.getFullYear(), d.getMonth() + 1, d.getDate()));
+  }
+
+  if (key === "thisMonth") return getMonthRange(today.slice(0, 7));
+
+  if (key === "lastMonth") {
+    const [y, m] = today.slice(0, 7).split("-").map(Number);
+    const prevMonth = m === 1 ? 12 : m - 1;
+    const prevYear = m === 1 ? y - 1 : y;
+    return getMonthRange(`${prevYear}-${String(prevMonth).padStart(2, "0")}`);
+  }
+
+  return { start: "", end: "" };
+}
+
 function DateFilter({
   value,
   onChange,
@@ -901,6 +932,29 @@ function DateFilter({
         </small>
       </div>
 
+
+      <div className="date-filter-presets">
+        {[
+          ["today", "Today"],
+          ["yesterday", "Yesterday"],
+          ["thisWeek", "This week"],
+          ["lastWeek", "Last week"],
+          ["thisMonth", "This month"],
+          ["lastMonth", "Last month"]
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className="date-preset-btn"
+            onClick={() => {
+              const preset = getPresetRange(key);
+              onChange({ mode: "range", start: preset.start, end: preset.end });
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <div className="date-filter-controls">
 
@@ -1314,9 +1368,35 @@ function DashboardApp({ session, profile, onSignOut }) {
   );
 
   const totals = useMemo(() => {
-    const total = data.team.reduce((s, x) => s + (Number(x.target) || 0), 0);
-    const done = data.team.reduce((s, x) => s + (Number(x.completed) || 0), 0);
-    const reviewed = data.team.reduce((s, x) => s + (Number(x.reviewed) || 0), 0);
+    // Computed fresh from sheetRecords + the live "latest work date" —
+    // never from the team.completed/target snapshot, which is only as
+    // current as the last import and can drift out of sync with
+    // Attendance (which always recalculates from scratch).
+    const latest = getLatestImportedDate(data);
+    const todayRows = (Array.isArray(data.sheetRecords) ? data.sheetRecords : []).filter(
+      r => r.date === latest && isWorkRow(r)
+    );
+
+    const done = todayRows.reduce((s, x) => s + (Number(x.worked) || 0), 0);
+    const reviewed = todayRows
+      .filter(x => /review/i.test(String(x.type || "")))
+      .reduce((s, x) => s + (Number(x.worked) || 0), 0);
+
+    // Same "target = sum of each worked project's daily target" logic
+    // parseWorkbook uses, just recalculated live instead of stored.
+    const byPerson = new Map();
+    todayRows.forEach(r => {
+      const key = r.name;
+      if (!byPerson.has(key)) byPerson.set(key, new Set());
+      byPerson.get(key).add(getConfiguredProjectName(r.project));
+    });
+    let total = 0;
+    byPerson.forEach(projectSet => {
+      projectSet.forEach(pname => {
+        total += Number(projectTargets[pname]) || 0;
+      });
+    });
+
     const remaining = data.projects.reduce(
       (s, x) => s + getProjectStats(x).remaining,
       0
@@ -4522,6 +4602,74 @@ function Analytics({ data }) {
     0
   );
 
+  // Productivity trend — daily/weekly/monthly, from the FULL history
+  // (independent of the period selector above).
+  const allWorkRecords = (Array.isArray(data.sheetRecords) ? data.sheetRecords : []).filter(isWorkRow);
+
+  function sumByBucket(keyFn, limit) {
+    const buckets = new Map();
+    allWorkRecords.forEach(r => {
+      const key = keyFn(r.date);
+      buckets.set(key, (buckets.get(key) || 0) + (Number(r.worked) || 0));
+    });
+    return [...buckets.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-limit);
+  }
+
+  const dailyProductivity = sumByBucket(d => d, 14);
+  const weeklyProductivity = sumByBucket(d => getWeekRange(d).start, 8);
+  const monthlyProductivity = sumByBucket(d => d.slice(0, 7), 6);
+
+  // Project productivity comparison, for the selected period.
+  const byProject = new Map();
+  sheetRows.filter(isWorkRow).forEach(r => {
+    const project = getConfiguredProjectName(r.project);
+    byProject.set(project, (byProject.get(project) || 0) + (Number(r.worked) || 0));
+  });
+  const projectComparison = [...byProject.entries()].sort((a, b) => b[1] - a[1]);
+  const projectMax = Math.max(1, ...projectComparison.map(([, v]) => v));
+
+  // Target vs actual, per employee, for the selected period.
+  const targetVsActual = data.team
+    .map(t => ({ name: t.name, target: Number(t.target) || 0, actual: memberMap[t.name]?.completed || 0 }))
+    .filter(x => x.target || x.actual)
+    .sort((a, b) => b.actual - a.actual);
+
+  // Attendance vs productivity, for the selected period (only meaningful
+  // for range mode with a real span — a single day makes attendance % trivial).
+  const attendanceForRange = buildAttendanceMatrix(data, normalizedRange);
+  const attendanceVsProductivity = attendanceForRange.rows
+    .map(row => {
+      const workingSlots = row.cells.filter(c => !["Week Off", "Holiday"].includes(c.status)).length;
+      const presentSlots = row.cells.filter(c => c.status === "Present").length + row.cells.filter(c => c.status === "Half Day").length * 0.5;
+      const attendancePct = workingSlots ? Math.round((presentSlots / workingSlots) * 100) : null;
+      return { name: row.name, attendancePct, productivity: memberMap[row.name]?.completed || 0 };
+    })
+    .filter(x => x.attendancePct != null);
+
+  // QA trend — condensed daily/weekly view, from the full accuracy history.
+  const allAccuracyAll = Array.isArray(data.accuracyRecords) ? data.accuracyRecords : [];
+  function accuracyByBucket(keyFn, limit) {
+    const buckets = new Map();
+    allAccuracyAll.forEach(x => {
+      if (!x.date) return;
+      const key = keyFn(x.date);
+      if (!buckets.has(key)) buckets.set(key, { tp: 0, fp: 0, fn: 0 });
+      const b = buckets.get(key);
+      b.tp += Number(x.tp) || 0;
+      b.fp += Number(x.fp) || 0;
+      b.fn += Number(x.fn) || 0;
+    });
+    return [...buckets.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .slice(-limit)
+      .map(([key, b]) => {
+        const denom = b.tp + b.fp + b.fn;
+        return { key, pct: denom ? Math.round((b.tp / denom) * 100) : null };
+      });
+  }
+  const qaDailyTrend = accuracyByBucket(d => d, 10);
+  const qaWeeklyTrend = accuracyByBucket(d => getWeekRange(d).start, 6);
+
   return (
     <Page
       title="Analytics"
@@ -4662,6 +4810,135 @@ function Analytics({ data }) {
           </div>
         )}
       </Panel>
+
+      <div className="grid three">
+        <Panel title="Daily productivity — last 14 days">
+          {!dailyProductivity.length ? <p className="muted">No data yet.</p> : (
+            <div className="bars">
+              {dailyProductivity.map(([date, v]) => (
+                <div className="bar-row" key={date}>
+                  <span>{date.slice(5)}</span>
+                  <div><i style={{ width: `${(v / Math.max(1, ...dailyProductivity.map(([, x]) => x))) * 100}%` }} /></div>
+                  <b>{v.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Weekly productivity — last 8 weeks">
+          {!weeklyProductivity.length ? <p className="muted">No data yet.</p> : (
+            <div className="bars">
+              {weeklyProductivity.map(([week, v]) => (
+                <div className="bar-row" key={week}>
+                  <span>{week.slice(5)}</span>
+                  <div><i style={{ width: `${(v / Math.max(1, ...weeklyProductivity.map(([, x]) => x))) * 100}%` }} /></div>
+                  <b>{v.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Monthly productivity — last 6 months">
+          {!monthlyProductivity.length ? <p className="muted">No data yet.</p> : (
+            <div className="bars">
+              {monthlyProductivity.map(([month, v]) => (
+                <div className="bar-row" key={month}>
+                  <span>{month}</span>
+                  <div><i style={{ width: `${(v / Math.max(1, ...monthlyProductivity.map(([, x]) => x))) * 100}%` }} /></div>
+                  <b>{v.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid two">
+        <Panel title={`Project comparison — ${range.label}`}>
+          {!projectComparison.length ? (
+            <p className="muted">No Daily Effort records exist for <b>{range.label}</b>.</p>
+          ) : (
+            <div className="bars">
+              {projectComparison.map(([project, v]) => (
+                <div className="bar-row" key={project}>
+                  <span>{project}</span>
+                  <div><i style={{ width: `${(v / projectMax) * 100}%` }} /></div>
+                  <b>{v.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title={`Target vs actual — ${range.label}`}>
+          {!targetVsActual.length ? (
+            <p className="muted">No team targets or work logged for <b>{range.label}</b>.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Name</th><th>Target</th><th>Actual</th><th>Achievement</th></tr></thead>
+                <tbody>
+                  {targetVsActual.map(x => (
+                    <tr key={x.name}>
+                      <td><b>{x.name}</b></td>
+                      <td>{x.target.toLocaleString()}</td>
+                      <td>{x.actual.toLocaleString()}</td>
+                      <td>{x.target ? `${Math.round((x.actual / x.target) * 100)}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid two">
+        <Panel title={`Attendance vs productivity — ${range.label}`}>
+          {!attendanceVsProductivity.length ? (
+            <p className="muted">Not enough attendance data for this period.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Name</th><th>Attendance</th><th>Images worked</th></tr></thead>
+                <tbody>
+                  {attendanceVsProductivity.map(x => (
+                    <tr key={x.name}>
+                      <td><b>{x.name}</b></td>
+                      <td>{x.attendancePct}%</td>
+                      <td>{x.productivity.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="QA accuracy trend">
+          {!qaDailyTrend.length ? (
+            <p className="muted">No Accuracy Report imported yet.</p>
+          ) : (
+            <>
+              <p className="muted settings-note">Daily (last 10)</p>
+              <div className="bars">
+                {qaDailyTrend.map(t => (
+                  <div className="bar-row" key={t.key}>
+                    <span>{t.key.slice(5)}</span>
+                    <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
+                    <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
+                  </div>
+                ))}
+              </div>
+              <p className="muted settings-note" style={{ marginTop: 14 }}>
+                Project-wise and reviewer-wise QA trends aren't available — your Accuracy Report doesn't currently include a project or reviewer column. See QA & Reviews for the weekly/monthly breakdown.
+              </p>
+            </>
+          )}
+        </Panel>
+      </div>
     </Page>
   );
 }
