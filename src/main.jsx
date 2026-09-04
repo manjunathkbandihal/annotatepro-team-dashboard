@@ -7,7 +7,7 @@ import {
   Download, Upload, Menu, X, CheckCircle2, Target,
   Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
   LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer,
-  Calendar, Sun
+  Calendar, Sun, Clock, Archive
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
@@ -103,7 +103,9 @@ const seed = {
     { id: 3, type: "Label inconsistency", project: "PCI_Annotations", owner: "Rahul", severity: "Low", status: "Resolved", date: "2026-08-10" }
   ],
 
-  holidays: []
+  holidays: [],
+
+  attendanceOverrides: []
 };
 
 
@@ -153,6 +155,10 @@ function loadData() {
 
       holidays: Array.isArray(saved.holidays)
         ? saved.holidays
+        : [],
+
+      attendanceOverrides: Array.isArray(saved.attendanceOverrides)
+        ? saved.attendanceOverrides
         : [],
 
       accuracyFile: saved.accuracyFile || "",
@@ -1173,6 +1179,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   const [showAdd, setShowAdd] = useState(false);
   const [addType, setAddType] = useState("team");
   const [editingMember, setEditingMember] = useState(null);
+  const [viewingProfile, setViewingProfile] = useState(null);
   const [editingProject, setEditingProject] = useState(null);
   const [toast, setToast] = useState("");
   const [showNotif, setShowNotif] = useState(false);
@@ -1364,7 +1371,10 @@ function DashboardApp({ session, profile, onSignOut }) {
           completed,
           remaining,
           status: getProjectStatus(totalImages, completed, remaining),
-          deadline: f.get("deadline") || ""
+          deadline: f.get("deadline") || "",
+          archived: false,
+          assignedEmployees: f.getAll("assignedEmployees"),
+          assignedReviewers: f.getAll("assignedReviewers")
         },
         ...data.projects
       ];
@@ -1374,11 +1384,17 @@ function DashboardApp({ session, profile, onSignOut }) {
         {
           id: Date.now(),
           type: f.get("type"),
+          description: f.get("description") || "",
           project: f.get("project"),
           owner: f.get("owner"),
+          assignedTo: f.get("assignedTo") || "",
           severity: f.get("severity"),
           status: "Open",
-          date: new Date().toISOString().slice(0, 10)
+          date: new Date().toISOString().slice(0, 10),
+          dueDate: f.get("dueDate") || "",
+          resolution: "",
+          resolvedDate: "",
+          comments: []
         }
       ];
     }
@@ -1418,7 +1434,9 @@ function DashboardApp({ session, profile, onSignOut }) {
             completed,
             remaining,
             status: getProjectStatus(totalImages, completed, remaining),
-            deadline: f.get("deadline") || ""
+            deadline: f.get("deadline") || "",
+            assignedEmployees: f.getAll("assignedEmployees"),
+            assignedReviewers: f.getAll("assignedReviewers")
           }
         : project
     );
@@ -1427,6 +1445,54 @@ function DashboardApp({ session, profile, onSignOut }) {
     setEditingProject(null);
     notify("Project updated successfully");
     logActivity(`Updated project "${name}"`);
+  }
+
+  function archiveProject(id) {
+    if (!canManageProjects) return notify("Only Admin or Team Lead can archive projects.");
+
+    const project = data.projects.find(p => p.id === id);
+    if (!project) return;
+    const archived = !project.archived;
+
+    update({
+      ...data,
+      projects: data.projects.map(p => (p.id === id ? { ...p, archived } : p))
+    });
+    notify(archived ? `${project.name} archived` : `${project.name} unarchived`);
+    logActivity(`${archived ? "Archived" : "Unarchived"} project "${project.name}"`);
+  }
+
+  function updateIssue(id, changes) {
+    if (!canManageIssues) return notify("Only Admin or Team Lead can update issues.");
+
+    const issues = data.issues.map(issue => {
+      if (issue.id !== id) return issue;
+      const next = { ...issue, ...changes };
+      // Stamp a resolved date automatically the moment status becomes
+      // Resolved/Closed, and clear it if it's reopened.
+      if (changes.status) {
+        if (["Resolved", "Closed"].includes(changes.status) && !issue.resolvedDate) {
+          next.resolvedDate = new Date().toISOString().slice(0, 10);
+        } else if (!["Resolved", "Closed"].includes(changes.status)) {
+          next.resolvedDate = "";
+        }
+      }
+      return next;
+    });
+
+    update({ ...data, issues });
+    logActivity(`Updated issue "${data.issues.find(i => i.id === id)?.type || id}"`);
+  }
+
+  function addIssueComment(id, text) {
+    if (!text || !text.trim()) return;
+    const issue = data.issues.find(i => i.id === id);
+    if (!issue) return;
+    const comments = [
+      ...(Array.isArray(issue.comments) ? issue.comments : []),
+      { id: Date.now(), text: text.trim(), at: new Date().toISOString() }
+    ];
+    updateIssue(id, { comments });
   }
 
   function remove(kind, id) {
@@ -1487,6 +1553,28 @@ function DashboardApp({ session, profile, onSignOut }) {
     update(next);
     notify("Team member deleted");
     logActivity(`Deleted team member "${name}"`);
+  }
+
+  function toggleMemberStatus(name) {
+    if (!canManageTeam) return notify("Only Admin or Team Lead can deactivate team members.");
+
+    const member = data.team.find(x => String(x.name).toLowerCase() === String(name).toLowerCase());
+    if (!member) return;
+
+    const nextStatus = member.status === "Inactive" ? "Active" : "Inactive";
+
+    const next = {
+      ...data,
+      team: data.team.map(x =>
+        String(x.name).toLowerCase() === String(name).toLowerCase()
+          ? { ...x, status: nextStatus }
+          : x
+      )
+    };
+
+    update(next);
+    notify(nextStatus === "Inactive" ? `${name} deactivated` : `${name} reactivated`);
+    logActivity(`${nextStatus === "Inactive" ? "Deactivated" : "Reactivated"} team member "${name}"`);
   }
 
   function clearImportedData() {
@@ -1688,6 +1776,8 @@ function DashboardApp({ session, profile, onSignOut }) {
               }}
               onEdit={member => { setEditingMember(member); setAddType("team"); setShowAdd(true); }}
               onDelete={removeTeamMember}
+              onToggleStatus={toggleMemberStatus}
+              onView={name => setViewingProfile(name)}
             />
           )}
 
@@ -1703,6 +1793,7 @@ function DashboardApp({ session, profile, onSignOut }) {
           {page === "projects" && (
             <Projects
               rows={data.projects}
+              data={data}
               remove={remove}
               canManage={canManageProjects}
               openAdd={() => {
@@ -1710,6 +1801,7 @@ function DashboardApp({ session, profile, onSignOut }) {
                 setShowAdd(true);
               }}
               openEdit={setEditingProject}
+              onArchive={archiveProject}
             />
           )}
 
@@ -1718,8 +1810,11 @@ function DashboardApp({ session, profile, onSignOut }) {
           {page === "issues" && (
             <Issues
               rows={data.issues}
+              data={data}
               remove={remove}
               canManage={canManageIssues}
+              onUpdate={updateIssue}
+              onComment={addIssueComment}
               openAdd={() => {
                 setAddType("issue");
                 setShowAdd(true);
@@ -1772,6 +1867,7 @@ function DashboardApp({ session, profile, onSignOut }) {
       {showAdd && addType !== "team" && (
         <Modal
           type={addType}
+          team={data.team}
           onClose={() => setShowAdd(false)}
           onSubmit={addRecord}
         />
@@ -1780,8 +1876,17 @@ function DashboardApp({ session, profile, onSignOut }) {
       {editingProject && (
         <ProjectEditModal
           project={editingProject}
+          team={data.team}
           onClose={() => setEditingProject(null)}
           onSubmit={editProject}
+        />
+      )}
+
+      {viewingProfile && (
+        <TeamProfileModal
+          name={viewingProfile}
+          data={data}
+          onClose={() => setViewingProfile(null)}
         />
       )}
 
@@ -2309,11 +2414,71 @@ function LoginScreen() {
    DASHBOARD
 ========================================================= */
 function Dashboard({ totals, data, setPage }) {
-  const active = data.team.filter(x => x.status === "Active").length;
+  const latestDate = getLatestImportedDate(data);
+
+  // Today's attendance snapshot — reuses the exact same logic as the
+  // Attendance page (buildAttendanceMatrix) for a single day, so the
+  // numbers here always agree with what Attendance shows.
+  const attendanceToday = useMemo(() => {
+    if (!latestDate) return { rows: [], summary: {} };
+    return buildAttendanceMatrix(data, { start: latestDate, end: latestDate });
+  }, [data, latestDate]);
+
+  const presentToday = attendanceToday.summary["Present"] || 0;
+  const absentToday = (attendanceToday.summary["No data"] || 0) + (attendanceToday.summary["Absent"] || 0);
+  const leaveToday = attendanceToday.summary["Leave"] || 0;
+  const absentNames = attendanceToday.rows
+    .filter(r => ["No data", "Absent"].includes(r.cells[0]?.status))
+    .map(r => r.name);
+
   const openIssues = data.issues.filter(x => x.status === "Open").length;
+  const activeProjects = data.projects.filter(x => x.status === "In Progress").length;
+
+  // Overall (all-time) project progress — Completed is cumulative across
+  // the whole imported history, so this reflects true overall standing.
+  const overallTarget = data.projects.reduce((s, p) => s + (Number(p.totalImages ?? p.total) || 0), 0);
+  const overallCompleted = data.projects.reduce((s, p) => s + (Number(p.completed) || 0), 0);
+  const overallCompletion = overallTarget ? Math.round((overallCompleted / overallTarget) * 100) : 0;
+
+  // QA accuracy / errors — all-time totals from imported Accuracy Reports.
+  const qaTotals = data.accuracyRecords.reduce(
+    (acc, x) => {
+      acc.tp += Number(x.tp) || 0;
+      acc.fp += Number(x.fp) || 0;
+      acc.fn += Number(x.fn) || 0;
+      return acc;
+    },
+    { tp: 0, fp: 0, fn: 0 }
+  );
+  const qaDenom = qaTotals.tp + qaTotals.fp + qaTotals.fn;
+  const qaAccuracy = qaDenom ? Math.round((qaTotals.tp / qaDenom) * 100) : 0;
+  const totalErrors = qaTotals.fp + qaTotals.fn;
+
   const completion = totals.total
     ? Math.round((totals.done / totals.total) * 100)
     : 0;
+
+  // Productivity trend — total images worked per day, last 7 work-days.
+  const trend = useMemo(() => {
+    const byDate = new Map();
+    data.sheetRecords.filter(isWorkRow).forEach(r => {
+      byDate.set(r.date, (byDate.get(r.date) || 0) + (Number(r.worked) || 0));
+    });
+    return [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-7);
+  }, [data.sheetRecords]);
+  const trendMax = Math.max(1, ...trend.map(([, v]) => v));
+
+  // Top performers today, from each team member's daily completed count.
+  const topPerformers = [...data.team]
+    .filter(x => (Number(x.completed) || 0) > 0)
+    .sort((a, b) => (Number(b.completed) || 0) - (Number(a.completed) || 0))
+    .slice(0, 5);
+  const topMax = Math.max(1, ...topPerformers.map(x => Number(x.completed) || 0));
+
+  // Needing attention — reuses the same logic as the notification bell
+  // (overdue/near-deadline projects, stale high-severity issues), plus
+  // anyone absent today.
+  const notifications = getNotifications(data);
 
   // Overview panel: surface what's currently being worked on rather than
   // every project. In Progress first, then Pending, Completed/No Target last.
@@ -2354,34 +2519,74 @@ function Dashboard({ totals, data, setPage }) {
 
       <div className="cards">
         <Metric
+          icon={Users}
+          label="Team members"
+          value={data.team.length}
+          note={`${presentToday} present today`}
+        />
+        <Metric
+          icon={AlertTriangle}
+          label="Absent today"
+          value={absentToday}
+          note="No work logged today"
+        />
+        <Metric
+          icon={Calendar}
+          label="On leave today"
+          value={leaveToday}
+          note="Marked On Leave in the sheet"
+        />
+        <Metric
+          icon={FolderKanban}
+          label="Active projects"
+          value={activeProjects}
+          note={`${data.projects.length} total projects`}
+        />
+
+        <Metric
           icon={Target}
-          label="Daily completion"
+          label="Productivity today"
           value={totals.done.toLocaleString()}
-          note={`${completion}% of target`}
-          trend="+8.4%"
+          note={`${completion}% of today's target`}
         />
         <Metric
           icon={ImageIcon}
-          label="Images remaining"
-          value={totals.remaining.toLocaleString()}
-          note="Across active projects"
-          trend="-12.2%"
+          label="Total images worked"
+          value={overallCompleted.toLocaleString()}
+          note={`${overallCompletion}% of overall target (${overallTarget.toLocaleString()})`}
         />
         <Metric
-          icon={Users}
-          label="Active team"
-          value={active}
-          note={`${data.team.length} total members`}
-          trend="Live"
+          icon={ShieldCheck}
+          label="QA accuracy"
+          value={qaDenom ? `${qaAccuracy}%` : "—"}
+          note={qaDenom ? `${totalErrors.toLocaleString()} total errors` : "No Accuracy Report imported yet"}
         />
         <Metric
           icon={AlertTriangle}
           label="Open issues"
           value={openIssues}
           note="Needs attention"
-          trend={openIssues ? "Action" : "Clear"}
         />
       </div>
+
+      <Panel title="Today's operational summary">
+        <p className="op-summary">
+          {latestDate ? (
+            <>
+              As of <b>{latestDate}</b>, <b>{presentToday}</b> of <b>{data.team.length}</b> team members are present
+              {absentToday ? <> ({absentToday} absent, no work logged)</> : null}
+              {leaveToday ? <>, {leaveToday} on leave</> : null}. The team completed{" "}
+              <b>{totals.done.toLocaleString()}</b> images today ({completion}% of today's target), out of{" "}
+              <b>{overallCompleted.toLocaleString()}</b> completed overall ({overallCompletion}% of the total target).{" "}
+              {qaDenom ? <>QA accuracy stands at <b>{qaAccuracy}%</b> across {qaDenom.toLocaleString()} reviewed images. </> : null}
+              There {openIssues === 1 ? "is" : "are"} <b>{openIssues}</b> open issue{openIssues === 1 ? "" : "s"} and{" "}
+              <b>{notifications.length}</b> item{notifications.length === 1 ? "" : "s"} needing attention.
+            </>
+          ) : (
+            "Import a Daily Effort Sheet to see today's operational summary."
+          )}
+        </p>
+      </Panel>
 
       <div className="grid two">
         <Panel title="Team performance" action="View all" onAction={() => setPage("team")}>
@@ -2480,19 +2685,64 @@ function Dashboard({ totals, data, setPage }) {
         </Panel>
       </div>
 
+      <div className="grid two">
+        <Panel title="Productivity trend" action="View reports" onAction={() => setPage("reports")}>
+          {!trend.length ? (
+            <p className="muted">No Daily Effort records imported yet.</p>
+          ) : (
+            <div className="bars">
+              {trend.map(([date, value]) => (
+                <div className="bar-row" key={date}>
+                  <span>{date.slice(5)}</span>
+                  <div>
+                    <i style={{ width: `${(value / trendMax) * 100}%` }} />
+                  </div>
+                  <b>{value.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Top performers today" action="View team" onAction={() => setPage("team")}>
+          {!topPerformers.length ? (
+            <p className="muted">No completed work logged today yet.</p>
+          ) : (
+            <div className="bars">
+              {topPerformers.map(x => (
+                <div className="bar-row" key={x.id}>
+                  <span>{x.name}</span>
+                  <div>
+                    <i style={{ width: `${(Number(x.completed) / topMax) * 100}%` }} />
+                  </div>
+                  <b>{Number(x.completed).toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
       <div className="grid three">
-        <Panel title="QA snapshot">
-          <div className="big-number">
-            {data.team
-              .reduce((s, x) => s + (Number(x.reviewed) || 0), 0)
-              .toLocaleString()}
-          </div>
-          <p className="muted">Images reviewed</p>
-          <div className="qa-line">
-            <span>Accuracy health</span>
-            <b>96.8%</b>
-          </div>
-          <Progress value={97} />
+        <Panel title="Needing attention" action={notifications.length ? "View all" : undefined} onAction={() => setPage("projects")}>
+          {!notifications.length && !absentNames.length ? (
+            <p className="muted">Nothing needs attention right now.</p>
+          ) : (
+            <ul className="attention-list">
+              {absentNames.slice(0, 3).map(name => (
+                <li key={`absent-${name}`}>
+                  <span className="attention-dot attention-absent" />
+                  <span>{name} — no work logged today</span>
+                </li>
+              ))}
+              {notifications.slice(0, 5).map(n => (
+                <li key={n.id}>
+                  <span className={`attention-dot attention-${n.kind}`} />
+                  <span>{n.title}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Panel>
 
         <Panel title="Today's activity">
@@ -2612,7 +2862,11 @@ function Panel({ title, action, onAction, children }) {
 /* =========================================================
    TEAM
 ========================================================= */
-function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
+function Team({ rows, data, openAdd, canManage, onEdit, onDelete, onToggleStatus, onView }) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
   const projectRows = useMemo(() => {
     const records = Array.isArray(data.sheetRecords)
       ? data.sheetRecords
@@ -2654,20 +2908,25 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
       if (!name || !project) return;
 
       const type = String(record.type || "").trim();
-      const role = /review/i.test(type) ? "Reviewer" : "Annotator";
-      const key = `${name}|||${project}|||${role}`;
+      const derivedRole = /review/i.test(type) ? "Reviewer" : "Annotator";
+      const key = `${name}|||${project}|||${derivedRole}`;
 
       if (!grouped[key]) {
+        // Status, Errors and a manually-set Role belong to the roster
+        // (data.team), not to today's sheet rows — pull the real values
+        // instead of assuming everyone is Active with 0 errors.
+        const member = rows.find(m => m.name.toLowerCase() === name.toLowerCase());
+
         grouped[key] = {
           id: key,
           name,
           project,
-          role,
+          role: member?.role || derivedRole,
           target: Number(projectTargets[project]) || 0,
           completed: 0,
           reviewed: 0,
-          errors: 0,
-          status: "Active"
+          errors: Number(member?.errors) || 0,
+          status: member?.status || "Active"
         };
       }
 
@@ -2704,6 +2963,36 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
     return result;
   }, [data.sheetRecords, rows]);
 
+  const roleOptions = [...new Set(projectRows.map(x => x.role).filter(Boolean))].sort();
+  const projectOptions = [...new Set(projectRows.map(x => x.project).filter(p => p && p !== "—"))].sort();
+
+  const visibleRows = useMemo(() => {
+    let list = projectRows;
+
+    if (statusFilter !== "all") {
+      list = list.filter(x => (x.status || "Active") === statusFilter);
+    }
+    if (roleFilter !== "all") {
+      list = list.filter(x => x.role === roleFilter);
+    }
+    if (projectFilter !== "all") {
+      list = list.filter(x => x.project === projectFilter);
+    }
+
+    const sorted = [...list];
+    if (sortBy === "name") {
+      sorted.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === "completed") {
+      sorted.sort((a, b) => (Number(b.completed) || 0) - (Number(a.completed) || 0));
+    } else if (sortBy === "target") {
+      sorted.sort((a, b) => (Number(b.target) || 0) - (Number(a.target) || 0));
+    } else if (sortBy === "progress") {
+      const pct = x => (Number(x.target) ? (Number(x.completed) / Number(x.target)) : 0);
+      sorted.sort((a, b) => pct(b) - pct(a));
+    }
+    return sorted;
+  }, [projectRows, statusFilter, roleFilter, projectFilter, sortBy]);
+
   const imported =
     Array.isArray(data.sheetRecords) &&
     data.sheetRecords.length > 0;
@@ -2727,7 +3016,102 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
       action={canManage ? "+ Add member" : undefined}
       onAction={openAdd}
     >
-      <Panel title={`${projectRows.length} records`}>
+      <Panel title="Ranking">
+        <div className="grid two">
+          <div>
+            <p className="muted settings-note">Productivity — by today's completed images</p>
+            <ol className="rank-list">
+              {[...data.team]
+                .sort((a, b) => (Number(b.completed) || 0) - (Number(a.completed) || 0))
+                .slice(0, 5)
+                .map((m, i) => (
+                  <li key={m.id}>
+                    <span className="rank-num">{i + 1}</span>
+                    <button className="name-link" onClick={() => onView(m.name)}>{m.name}</button>
+                    <b>{Number(m.completed).toLocaleString()}</b>
+                  </li>
+                ))}
+            </ol>
+          </div>
+
+          <div>
+            <p className="muted settings-note">Quality — by accuracy across imported Accuracy Reports</p>
+            {(() => {
+              const byName = new Map();
+              (data.accuracyRecords || []).forEach(r => {
+                const key = r.name || "Unknown";
+                if (!byName.has(key)) byName.set(key, { tp: 0, fp: 0, fn: 0 });
+                const e = byName.get(key);
+                e.tp += Number(r.tp) || 0;
+                e.fp += Number(r.fp) || 0;
+                e.fn += Number(r.fn) || 0;
+              });
+              const qualityRanked = [...byName.entries()]
+                .map(([name, v]) => {
+                  const denom = v.tp + v.fp + v.fn;
+                  return { name, accuracy: denom ? Math.round((v.tp / denom) * 100) : 0, denom };
+                })
+                .filter(x => x.denom > 0)
+                .sort((a, b) => b.accuracy - a.accuracy)
+                .slice(0, 5);
+
+              return qualityRanked.length ? (
+                <ol className="rank-list">
+                  {qualityRanked.map((x, i) => (
+                    <li key={x.name}>
+                      <span className="rank-num">{i + 1}</span>
+                      <button className="name-link" onClick={() => onView(x.name)}>{x.name}</button>
+                      <b>{x.accuracy}%</b>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="muted">No Accuracy Report imported yet.</p>
+              );
+            })()}
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title={`${visibleRows.length} of ${projectRows.length} records`}>
+        <div className="report-controls">
+          <label>
+            Status
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="all">All</option>
+              <option value="Active">Active</option>
+              <option value="Away">Away</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </label>
+
+          <label>
+            Role
+            <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+              <option value="all">All</option>
+              {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </label>
+
+          <label>
+            Project
+            <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
+              <option value="all">All</option>
+              {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+
+          <label>
+            Sort by
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
+              <option value="name">Name</option>
+              <option value="completed">Completed</option>
+              <option value="target">Target</option>
+              <option value="progress">Progress</option>
+            </select>
+          </label>
+        </div>
+
         <div className="table-wrap">
           <table>
             <thead>
@@ -2746,7 +3130,7 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
             </thead>
 
             <tbody>
-              {projectRows.map(x => {
+              {visibleRows.map(x => {
                 const target = Number(x.target) || 0;
                 const completed = Number(x.completed) || 0;
                 const progress = target
@@ -2760,7 +3144,9 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
                         <div className="mini-avatar">
                           {x.name.slice(0, 1).toUpperCase()}
                         </div>
-                        <b>{x.name}</b>
+                        <button className="name-link" onClick={() => onView(x.name)}>
+                          <b>{x.name}</b>
+                        </button>
                       </div>
                     </td>
 
@@ -2806,6 +3192,13 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete }) {
                               onEdit(member || { id: x.id, name: x.name, role: x.role, target: target, completed, reviewed: Number(x.reviewed) || 0, errors: Number(x.errors) || 0, status: x.status || "Active" });
                             }}
                           >Edit</button>
+                          <button
+                            className="secondary compact-btn"
+                            onClick={() => onToggleStatus(x.name)}
+                            title={x.status === "Inactive" ? `Reactivate ${x.name}` : `Deactivate ${x.name}`}
+                          >
+                            {x.status === "Inactive" ? "Reactivate" : "Deactivate"}
+                          </button>
                           <button className="delete" onClick={() => onDelete(x.name)} title={`Delete ${x.name}`}>
                             <Trash2 size={16} />
                           </button>
@@ -2854,7 +3247,10 @@ function isWeekendDate(dateISO) {
   return day === 0 || day === 6;
 }
 
-function getAttendanceStatus(dateISO, rowsForCell, holidaySet) {
+function getAttendanceStatus(dateISO, rowsForCell, holidaySet, override) {
+  // A manual correction always wins over anything auto-derived.
+  if (override) return override;
+
   if (holidaySet.has(dateISO)) return "Holiday";
   if (isWeekendDate(dateISO)) return "Week Off";
 
@@ -2870,6 +3266,8 @@ function getAttendanceStatus(dateISO, rowsForCell, holidaySet) {
   // calendar doesn't consider a weekend (rare) — treat conservatively as leave.
   return "Leave";
 }
+
+const ATTENDANCE_STATUSES = ["Present", "Absent", "Leave", "Half Day", "Week Off", "Holiday"];
 
 function buildAttendanceMatrix(data, range) {
   const dates = listDatesInRange(range);
@@ -2889,22 +3287,42 @@ function buildAttendanceMatrix(data, range) {
     (Array.isArray(data.holidays) ? data.holidays : []).map(h => h.date)
   );
 
+  const overrideMap = new Map(
+    (Array.isArray(data.attendanceOverrides) ? data.attendanceOverrides : [])
+      .map(o => [`${o.name}__${o.date}`, o.status])
+  );
+
   const rows = names.map(name => ({
     name,
     cells: dates.map(date => ({
       date,
-      status: getAttendanceStatus(date, byKey.get(`${name}__${date}`), holidaySet)
+      status: getAttendanceStatus(
+        date,
+        byKey.get(`${name}__${date}`),
+        holidaySet,
+        overrideMap.get(`${name}__${date}`)
+      )
     }))
   }));
 
-  const summary = { Present: 0, Leave: 0, "Week Off": 0, Holiday: 0, "No data": 0 };
+  const summary = { Present: 0, Absent: 0, Leave: 0, "Half Day": 0, "Week Off": 0, Holiday: 0, "No data": 0 };
   rows.forEach(row => {
     row.cells.forEach(c => {
       summary[c.status] = (summary[c.status] || 0) + 1;
     });
   });
 
-  return { dates, rows, summary };
+  // "Working day" slots are every cell that isn't a Week Off or Holiday —
+  // the meaningful denominator for attendance percentages.
+  const workingDaySlots = Object.entries(summary).reduce(
+    (s, [status, count]) => (["Week Off", "Holiday"].includes(status) ? s : s + count),
+    0
+  );
+  const presentPct = workingDaySlots
+    ? Math.round(((summary.Present + summary["Half Day"] * 0.5) / workingDaySlots) * 100)
+    : null;
+
+  return { dates, rows, summary, workingDaySlots, presentPct };
 }
 
 function Attendance({ data, update, canManage, notify }) {
@@ -2922,6 +3340,23 @@ function Attendance({ data, update, canManage, notify }) {
 
   const range = useMemo(() => getDateRange(filter), [filter]);
   const matrix = useMemo(() => buildAttendanceMatrix(data, range), [data, range]);
+
+  // Daily trend — present % for each date in the range, across everyone.
+  const trend = useMemo(() => {
+    return matrix.dates.map(date => {
+      let present = 0;
+      let slots = 0;
+      matrix.rows.forEach(row => {
+        const cell = row.cells.find(c => c.date === date);
+        if (!cell) return;
+        if (["Week Off", "Holiday"].includes(cell.status)) return;
+        slots += 1;
+        if (cell.status === "Present") present += 1;
+        if (cell.status === "Half Day") present += 0.5;
+      });
+      return { date, pct: slots ? Math.round((present / slots) * 100) : null };
+    });
+  }, [matrix]);
 
   function addHoliday(e) {
     e.preventDefault();
@@ -2947,20 +3382,39 @@ function Attendance({ data, update, canManage, notify }) {
     });
   }
 
+  function setAttendanceOverride(name, date, status) {
+    if (!canManage) return notify && notify("Only Admin or Team Lead can mark attendance.");
+
+    const existing = Array.isArray(data.attendanceOverrides) ? data.attendanceOverrides : [];
+    const withoutThis = existing.filter(o => !(o.name === name && o.date === date));
+
+    // Empty selection means "back to auto" — just drop the override.
+    const next = status ? [...withoutThis, { id: `${name}__${date}`, name, date, status }] : withoutThis;
+
+    update({ ...data, attendanceOverrides: next });
+    logActivity(`Marked ${name}'s attendance on ${date} as ${status || "auto"}`);
+  }
+
+  const pct = (status) => matrix.workingDaySlots ? Math.round(((matrix.summary[status] || 0) / matrix.workingDaySlots) * 100) : 0;
+
   return (
     <Page
       title="Attendance"
-      subtitle="Present, on leave, week off, and holidays — derived from your imported sheet."
+      subtitle="Present, absent, on leave, half day, week off, and holidays."
     >
       <Panel title="Date range">
         <DateFilter value={filter} onChange={setFilter} data={data} />
       </Panel>
 
       <div className="cards">
-        <Metric icon={CheckCircle2} label="Present" value={matrix.summary["Present"] || 0} />
-        <Metric icon={Users} label="On leave" value={matrix.summary["Leave"] || 0} />
+        <Metric icon={CheckCircle2} label="Present" value={matrix.summary["Present"] || 0} note={matrix.workingDaySlots ? `${pct("Present")}% of working days` : undefined} />
+        <Metric icon={AlertTriangle} label="Absent" value={matrix.summary["Absent"] || 0} note={matrix.workingDaySlots ? `${pct("Absent")}% of working days` : undefined} />
+        <Metric icon={Users} label="On leave" value={matrix.summary["Leave"] || 0} note={matrix.workingDaySlots ? `${pct("Leave")}% of working days` : undefined} />
+        <Metric icon={Clock} label="Half day" value={matrix.summary["Half Day"] || 0} />
         <Metric icon={Calendar} label="Week off" value={matrix.summary["Week Off"] || 0} />
         <Metric icon={Sun} label="Holiday" value={matrix.summary["Holiday"] || 0} />
+        <Metric icon={FileText} label="Working days" value={matrix.workingDaySlots} note="Present + Absent + Leave + Half day slots" />
+        <Metric icon={BarChart3} label="Attendance rate" value={matrix.presentPct != null ? `${matrix.presentPct}%` : "—"} note="Present + ½ Half day, of working days" />
       </div>
 
       {canManage && (
@@ -3001,7 +3455,27 @@ function Attendance({ data, update, canManage, notify }) {
         </Panel>
       )}
 
+      <Panel title="Attendance trend">
+        {!trend.length ? (
+          <p className="muted">Select a date range to see the trend.</p>
+        ) : (
+          <div className="bars">
+            {trend.map(t => (
+              <div className="bar-row" key={t.date}>
+                <span>{t.date.slice(5)}</span>
+                <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
+                <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
       <Panel title={`Attendance grid — ${matrix.rows.length} team member${matrix.rows.length === 1 ? "" : "s"}`}>
+        {canManage && (
+          <p className="muted settings-note">Click any cell to correct it manually. Choosing "Auto" removes the correction.</p>
+        )}
+
         {!matrix.dates.length ? (
           <p className="muted">Select a date range to see attendance.</p>
         ) : !matrix.rows.length ? (
@@ -3019,9 +3493,24 @@ function Attendance({ data, update, canManage, notify }) {
                 {matrix.rows.map(row => (
                   <tr key={row.name}>
                     <td><b>{row.name}</b></td>
-                    {row.cells.map(c => (
-                      <td key={c.date}><Status text={c.status} /></td>
-                    ))}
+                    {row.cells.map(c =>
+                      canManage ? (
+                        <td key={c.date}>
+                          <select
+                            className={`status-select status-${c.status.toLowerCase().replace(/\s+/g, "-")}`}
+                            value={c.status}
+                            onChange={e => setAttendanceOverride(row.name, c.date, e.target.value === "Auto" ? "" : e.target.value)}
+                          >
+                            <option value="Auto">Auto ({c.status})</option>
+                            {ATTENDANCE_STATUSES.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </td>
+                      ) : (
+                        <td key={c.date}><Status text={c.status} /></td>
+                      )
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -3036,7 +3525,13 @@ function Attendance({ data, update, canManage, notify }) {
 /* =========================================================
    PROJECTS
 ========================================================= */
-function Projects({ rows, remove, openAdd, openEdit, canManage }) {
+function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive }) {
+  const [showArchived, setShowArchived] = useState(false);
+  const [viewingProject, setViewingProject] = useState(null);
+
+  const visibleRows = rows.filter(p => (showArchived ? true : !p.archived));
+  const archivedCount = rows.filter(p => p.archived).length;
+
   return (
     <Page
       title="Projects"
@@ -3044,12 +3539,19 @@ function Projects({ rows, remove, openAdd, openEdit, canManage }) {
       action={canManage ? "+ Add project" : undefined}
       onAction={openAdd}
     >
+      {archivedCount > 0 && (
+        <label className="report-toggle" style={{ marginBottom: 16, display: "inline-flex" }}>
+          <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />
+          Show archived ({archivedCount})
+        </label>
+      )}
+
       <div className="project-cards">
-        {rows.map(p => {
+        {visibleRows.map(p => {
           const s = getProjectStats(p);
 
           return (
-            <div className="project-card" key={p.id}>
+            <div className={`project-card ${p.archived ? "project-card-archived" : ""}`} key={p.id}>
               <div className="project-card-top">
                 <div className="project-icon">
                   <FolderKanban />
@@ -3068,6 +3570,16 @@ function Projects({ rows, remove, openAdd, openEdit, canManage }) {
                     </button>
 
                     <button
+                      className="icon-btn project-edit-btn"
+                      type="button"
+                      title={p.archived ? "Unarchive project" : "Archive project"}
+                      aria-label={p.archived ? `Unarchive ${p.name}` : `Archive ${p.name}`}
+                      onClick={() => onArchive(p.id)}
+                    >
+                      <Archive size={16} />
+                    </button>
+
+                    <button
                       className="delete"
                       type="button"
                       title="Delete project"
@@ -3080,10 +3592,12 @@ function Projects({ rows, remove, openAdd, openEdit, canManage }) {
                 )}
               </div>
 
-              <h3>{p.name}</h3>
+              <button className="name-link" onClick={() => setViewingProject(p)}>
+                <h3>{p.name}</h3>
+              </button>
 
               {/* Status and remaining images are calculated automatically from total images and completed values */}
-              <Status text={s.status} />
+              <Status text={p.archived ? "Archived" : s.status} />
 
               <div className="pc-stat">
                 <span>Total images</span>
@@ -3120,7 +3634,153 @@ function Projects({ rows, remove, openAdd, openEdit, canManage }) {
           );
         })}
       </div>
+
+      {viewingProject && (
+        <ProjectProfileModal
+          project={viewingProject}
+          data={data}
+          onClose={() => setViewingProject(null)}
+        />
+      )}
     </Page>
+  );
+}
+
+function ProjectProfileModal({ project, data, onClose }) {
+  const s = getProjectStats(project);
+
+  const myRecords = (data.sheetRecords || []).filter(
+    r => getConfiguredProjectName(r.project) === project.name && isWorkRow(r)
+  );
+
+  // Daily production — last 7 work-days for this project.
+  const byDate = new Map();
+  myRecords.forEach(r => byDate.set(r.date, (byDate.get(r.date) || 0) + (Number(r.worked) || 0)));
+  const daily = [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-7);
+  const dailyMax = Math.max(1, ...daily.map(([, v]) => v));
+
+  // Weekly production — last 6 weeks.
+  const byWeek = new Map();
+  myRecords.forEach(r => {
+    const w = getWeekRange(r.date);
+    const key = w.start;
+    byWeek.set(key, (byWeek.get(key) || 0) + (Number(r.worked) || 0));
+  });
+  const weekly = [...byWeek.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-6);
+  const weeklyMax = Math.max(1, ...weekly.map(([, v]) => v));
+
+  // Monthly production — last 6 months.
+  const byMonth = new Map();
+  myRecords.forEach(r => {
+    const key = r.date.slice(0, 7);
+    byMonth.set(key, (byMonth.get(key) || 0) + (Number(r.worked) || 0));
+  });
+  const monthly = [...byMonth.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-6);
+  const monthlyMax = Math.max(1, ...monthly.map(([, v]) => v));
+
+  // Completion forecast — simple linear projection from recent pace.
+  // Calendar-day based, doesn't account for weekends/leave, so treat this
+  // as a rough estimate, not a commitment.
+  const recentDates = [...byDate.keys()].sort().slice(-14);
+  const recentTotal = recentDates.reduce((sum, d) => sum + (byDate.get(d) || 0), 0);
+  const avgPace = recentDates.length ? recentTotal / recentDates.length : 0;
+  let forecastText = "Not enough recent data to forecast.";
+  if (s.total && s.remaining <= 0) {
+    forecastText = "Already complete.";
+  } else if (avgPace > 0 && s.remaining > 0) {
+    const daysNeeded = Math.ceil(s.remaining / avgPace);
+    const lastDate = dateKeyToLocalDate(recentDates[recentDates.length - 1]) || new Date();
+    const est = new Date(lastDate);
+    est.setDate(est.getDate() + daysNeeded);
+    const estISO = toISODate(est.getFullYear(), est.getMonth() + 1, est.getDate());
+    forecastText = `At the recent pace of ~${Math.round(avgPace).toLocaleString()} images/day, completion is estimated around ${estISO} (${daysNeeded} day${daysNeeded === 1 ? "" : "s"} away).`;
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal profile-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="person">
+            <div className="project-icon"><FolderKanban size={18} /></div>
+            <div>
+              <b>{project.name}</b>
+              <small>Due {project.deadline || "—"} • <Status text={project.archived ? "Archived" : s.status} /></small>
+            </div>
+          </div>
+
+          <button className="icon-btn" type="button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+
+        <div className="profile-stats">
+          <div><span>Total</span><b>{s.total.toLocaleString()}</b><small>images</small></div>
+          <div><span>Completed</span><b>{s.completed.toLocaleString()}</b><small>{s.progress}%</small></div>
+          <div><span>Remaining</span><b>{s.remaining.toLocaleString()}</b><small>images</small></div>
+          <div><span>Daily target</span><b>{project.target ? Number(project.target).toLocaleString() : "—"}</b><small>per day</small></div>
+        </div>
+
+        <div className="modal-section">
+          <b>Assigned employees</b>
+          <p className="muted">{(project.assignedEmployees || []).length ? project.assignedEmployees.join(", ") : "None assigned"}</p>
+        </div>
+
+        <div className="modal-section">
+          <b>Assigned reviewers</b>
+          <p className="muted">{(project.assignedReviewers || []).length ? project.assignedReviewers.join(", ") : "None assigned"}</p>
+        </div>
+
+        <div className="modal-section">
+          <b>Daily production — last 7 work-days</b>
+          {daily.length ? (
+            <div className="bars">
+              {daily.map(([date, value]) => (
+                <div className="bar-row" key={date}>
+                  <span>{date.slice(5)}</span>
+                  <div><i style={{ width: `${(value / dailyMax) * 100}%` }} /></div>
+                  <b>{value.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          ) : <p className="muted">No work logged yet.</p>}
+        </div>
+
+        <div className="modal-section">
+          <b>Weekly production — last 6 weeks</b>
+          {weekly.length ? (
+            <div className="bars">
+              {weekly.map(([week, value]) => (
+                <div className="bar-row" key={week}>
+                  <span>{week.slice(5)}</span>
+                  <div><i style={{ width: `${(value / weeklyMax) * 100}%` }} /></div>
+                  <b>{value.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          ) : <p className="muted">No work logged yet.</p>}
+        </div>
+
+        <div className="modal-section">
+          <b>Monthly production — last 6 months</b>
+          {monthly.length ? (
+            <div className="bars">
+              {monthly.map(([month, value]) => (
+                <div className="bar-row" key={month}>
+                  <span>{month}</span>
+                  <div><i style={{ width: `${(value / monthlyMax) * 100}%` }} /></div>
+                  <b>{value.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          ) : <p className="muted">No work logged yet.</p>}
+        </div>
+
+        <div className="modal-section">
+          <b>Completion forecast</b>
+          <p className="muted">{forecastText}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3156,6 +3816,78 @@ function QA({ data }) {
     ? accuracyRows.reduce((s, x) => s + (Number(x.score) || 0), 0) / accuracyRows.length
     : 0;
 
+  // QA trend — accuracy % over time, computed from the FULL history
+  // (independent of the period selector above), grouped 3 ways.
+  function accuracyByBucket(keyFn, limit) {
+    const buckets = new Map();
+    allAccuracyRows.forEach(x => {
+      if (!x.date) return;
+      const key = keyFn(x.date);
+      if (!buckets.has(key)) buckets.set(key, { tp: 0, fp: 0, fn: 0 });
+      const b = buckets.get(key);
+      b.tp += Number(x.tp) || 0;
+      b.fp += Number(x.fp) || 0;
+      b.fn += Number(x.fn) || 0;
+    });
+    return [...buckets.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .slice(-limit)
+      .map(([key, b]) => {
+        const denom = b.tp + b.fp + b.fn;
+        return { key, pct: denom ? Math.round((b.tp / denom) * 100) : null };
+      });
+  }
+
+  const dailyTrend = accuracyByBucket(d => d, 7);
+  const weeklyTrend = accuracyByBucket(d => getWeekRange(d).start, 6);
+  const monthlyTrend = accuracyByBucket(d => d.slice(0, 7), 6);
+
+  // Employee quality ranking with trend context, for this page specifically
+  // (Team page has a simpler top-5 version of this same idea).
+  const byName = new Map();
+  allAccuracyRows.forEach(x => {
+    const key = x.name || "Unknown";
+    if (!byName.has(key)) byName.set(key, { tp: 0, fp: 0, fn: 0, count: 0 });
+    const e = byName.get(key);
+    e.tp += Number(x.tp) || 0;
+    e.fp += Number(x.fp) || 0;
+    e.fn += Number(x.fn) || 0;
+    e.count += 1;
+  });
+  const employeeQuality = [...byName.entries()]
+    .map(([name, v]) => {
+      const denom = v.tp + v.fp + v.fn;
+      return { name, accuracy: denom ? Math.round((v.tp / denom) * 100) : 0, denom, count: v.count };
+    })
+    .filter(x => x.denom > 0)
+    .sort((a, b) => b.accuracy - a.accuracy);
+
+  // Reviewer performance — only meaningful if the Accuracy Report sheet
+  // actually has a Reviewer column. Most don't yet, so this is honest
+  // about being empty rather than guessing who reviewed what.
+  const hasReviewerData = allAccuracyRows.some(x => x.reviewer);
+  const byReviewer = new Map();
+  if (hasReviewerData) {
+    allAccuracyRows.forEach(x => {
+      if (!x.reviewer) return;
+      const key = x.reviewer;
+      if (!byReviewer.has(key)) byReviewer.set(key, { reviewed: 0, errorsFound: 0, days: new Set() });
+      const r = byReviewer.get(key);
+      r.reviewed += Number(x.dailyCount) || 0;
+      r.errorsFound += (Number(x.fp) || 0) + (Number(x.fn) || 0);
+      if (x.date) r.days.add(x.date);
+    });
+  }
+  const reviewerRows = [...byReviewer.entries()]
+    .map(([name, v]) => ({
+      name,
+      reviewed: v.reviewed,
+      errorsFound: v.errorsFound,
+      days: v.days.size,
+      perDay: v.days.size ? Math.round(v.reviewed / v.days.size) : 0
+    }))
+    .sort((a, b) => b.reviewed - a.reviewed);
+
   return (
     <Page
       title="QA & Reviews"
@@ -3183,6 +3915,123 @@ function QA({ data }) {
           <div><h2>{averageScore.toFixed(1)}</h2><p className="muted">Average score</p></div>
           <div><h2>{data.issues.filter(x => x.status === "Open").length}</h2><p className="muted">Open QA issues</p></div>
         </div>
+      </Panel>
+
+      <div className="grid two">
+        <Panel title="Error breakdown — all-time">
+          {totalTP + totalFP + totalFN === 0 && !allAccuracyRows.length ? (
+            <p className="muted">No Accuracy Report imported yet.</p>
+          ) : (
+            (() => {
+              const allFP = allAccuracyRows.reduce((s, x) => s + (Number(x.fp) || 0), 0);
+              const allFN = allAccuracyRows.reduce((s, x) => s + (Number(x.fn) || 0), 0);
+              const maxErr = Math.max(1, allFP, allFN);
+              return (
+                <div className="bars">
+                  <div className="bar-row">
+                    <span>False positives</span>
+                    <div><i style={{ width: `${(allFP / maxErr) * 100}%` }} /></div>
+                    <b>{allFP.toLocaleString()}</b>
+                  </div>
+                  <div className="bar-row">
+                    <span>False negatives</span>
+                    <div><i style={{ width: `${(allFN / maxErr) * 100}%` }} /></div>
+                    <b>{allFN.toLocaleString()}</b>
+                  </div>
+                </div>
+              );
+            })()
+          )}
+          <p className="muted settings-note">Your Accuracy Report doesn't include a finer error-category breakdown beyond False Positive / False Negative — add one to your sheet if you want more detail here.</p>
+        </Panel>
+
+        <Panel title="Employee quality ranking — all-time">
+          {!employeeQuality.length ? (
+            <p className="muted">No Accuracy Report imported yet.</p>
+          ) : (
+            <ol className="rank-list">
+              {employeeQuality.slice(0, 8).map((x, i) => (
+                <li key={x.name}>
+                  <span className="rank-num">{i + 1}</span>
+                  <span>{x.name}</span>
+                  <b>{x.accuracy}%</b>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid three">
+        <Panel title="Daily QA trend">
+          {!dailyTrend.length ? <p className="muted">No data yet.</p> : (
+            <div className="bars">
+              {dailyTrend.map(t => (
+                <div className="bar-row" key={t.key}>
+                  <span>{t.key.slice(5)}</span>
+                  <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
+                  <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Weekly QA trend">
+          {!weeklyTrend.length ? <p className="muted">No data yet.</p> : (
+            <div className="bars">
+              {weeklyTrend.map(t => (
+                <div className="bar-row" key={t.key}>
+                  <span>{t.key.slice(5)}</span>
+                  <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
+                  <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Monthly QA trend">
+          {!monthlyTrend.length ? <p className="muted">No data yet.</p> : (
+            <div className="bars">
+              {monthlyTrend.map(t => (
+                <div className="bar-row" key={t.key}>
+                  <span>{t.key}</span>
+                  <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
+                  <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <Panel title="Reviewer performance">
+        {!hasReviewerData ? (
+          <p className="muted">
+            Your Accuracy Report sheet doesn't have a "Reviewer" column, so there's no way to know who performed each review — this section can't show real data yet.
+            Add a Reviewer column to your sheet (any of these header names work: Reviewer, Reviewed By, QA Reviewer) and re-import to populate this automatically.
+          </p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Reviewer</th><th>Images reviewed</th><th>Errors found</th><th>Active days</th><th>Avg / day</th></tr>
+              </thead>
+              <tbody>
+                {reviewerRows.map(r => (
+                  <tr key={r.name}>
+                    <td><b>{r.name}</b></td>
+                    <td>{r.reviewed.toLocaleString()}</td>
+                    <td>{r.errorsFound.toLocaleString()}</td>
+                    <td>{r.days}</td>
+                    <td>{r.perDay.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
 
       <Panel title={`Accuracy Report — ${accuracyRows.length} records`}>
@@ -3231,7 +4080,55 @@ function QA({ data }) {
 /* =========================================================
    ISSUES
 ========================================================= */
-function Issues({ rows, remove, openAdd, canManage }) {
+function Issues({ rows, data, remove, openAdd, canManage, onUpdate, onComment }) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState({ mode: "range", start: "", end: "" });
+  const [viewingIssue, setViewingIssue] = useState(null);
+
+  const projectOptions = [...new Set(rows.map(x => x.project).filter(Boolean))].sort();
+  const ownerOptions = [...new Set(rows.map(x => x.owner).filter(Boolean))].sort();
+  const range = getDateRange(dateFilter);
+
+  const filteredRows = rows.filter(x => {
+    if (statusFilter !== "all" && x.status !== statusFilter) return false;
+    if (projectFilter !== "all" && x.project !== projectFilter) return false;
+    if (ownerFilter !== "all" && x.owner !== ownerFilter) return false;
+    if (severityFilter !== "all" && x.severity !== severityFilter) return false;
+    if (range.start && range.end && !isDateInRange(x.date, range)) return false;
+    return true;
+  });
+
+  const today = getTodayISO();
+  const openCount = rows.filter(x => x.status === "Open").length;
+  const inProgressCount = rows.filter(x => x.status === "In Progress").length;
+  const resolvedCount = rows.filter(x => ["Resolved", "Closed"].includes(x.status)).length;
+  const overdueCount = rows.filter(
+    x => x.dueDate && x.dueDate < today && !["Resolved", "Closed"].includes(x.status)
+  ).length;
+
+  const resolvedWithDates = rows.filter(x => x.resolvedDate && x.date);
+  const avgResolutionDays = resolvedWithDates.length
+    ? Math.round(
+        resolvedWithDates.reduce((s, x) => s + (daysBetweenDates(x.date, x.resolvedDate) || 0), 0) /
+          resolvedWithDates.length
+      )
+    : null;
+
+  // Issue trend — created per day, last 14 days that have any issue.
+  const byDate = new Map();
+  rows.forEach(x => { if (x.date) byDate.set(x.date, (byDate.get(x.date) || 0) + 1); });
+  const trend = [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-14);
+  const trendMax = Math.max(1, ...trend.map(([, v]) => v));
+
+  // Project-wise issue counts.
+  const byProject = new Map();
+  rows.forEach(x => { if (x.project) byProject.set(x.project, (byProject.get(x.project) || 0) + 1); });
+  const projectCounts = [...byProject.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const projectMax = Math.max(1, ...projectCounts.map(([, v]) => v));
+
   return (
     <Page
       title="Issues tracker"
@@ -3239,51 +4136,278 @@ function Issues({ rows, remove, openAdd, canManage }) {
       action={canManage ? "+ Log issue" : undefined}
       onAction={openAdd}
     >
-      <Panel
-        title={`${rows.filter(x => x.status === "Open").length} open issues`}
-      >
+      <div className="cards">
+        <Metric icon={AlertTriangle} label="Open" value={openCount} />
+        <Metric icon={Clock} label="In progress" value={inProgressCount} />
+        <Metric icon={CheckCircle2} label="Resolved / closed" value={resolvedCount} />
+        <Metric icon={AlertTriangle} label="Overdue" value={overdueCount} note="Past due date, still open" />
+      </div>
+
+      <div className="grid two">
+        <Panel title="Issue trend — last 14 days with activity">
+          {!trend.length ? <p className="muted">No issues logged yet.</p> : (
+            <div className="bars">
+              {trend.map(([date, count]) => (
+                <div className="bar-row" key={date}>
+                  <span>{date.slice(5)}</span>
+                  <div><i style={{ width: `${(count / trendMax) * 100}%` }} /></div>
+                  <b>{count}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Project-wise issues">
+          {!projectCounts.length ? <p className="muted">No issues logged yet.</p> : (
+            <div className="bars">
+              {projectCounts.map(([project, count]) => (
+                <div className="bar-row" key={project}>
+                  <span>{project}</span>
+                  <div><i style={{ width: `${(count / projectMax) * 100}%` }} /></div>
+                  <b>{count}</b>
+                </div>
+              ))}
+            </div>
+          )}
+          {avgResolutionDays != null && (
+            <p className="muted settings-note">Average resolution time: <b>{avgResolutionDays} day{avgResolutionDays === 1 ? "" : "s"}</b>, based on {resolvedWithDates.length} resolved issue{resolvedWithDates.length === 1 ? "" : "s"}.</p>
+          )}
+        </Panel>
+      </div>
+
+      <Panel title={`${filteredRows.length} of ${rows.length} issues`}>
+        <div className="report-controls">
+          <label>
+            Status
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="all">All</option>
+              <option value="Open">Open</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Resolved">Resolved</option>
+              <option value="Closed">Closed</option>
+            </select>
+          </label>
+          <label>
+            Project
+            <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
+              <option value="all">All</option>
+              {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+          <label>
+            Employee
+            <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}>
+              <option value="all">All</option>
+              {ownerOptions.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </label>
+          <label>
+            Priority
+            <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}>
+              <option value="all">All</option>
+              <option value="High">High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </label>
+          <DateFilter value={dateFilter} onChange={setDateFilter} data={data} />
+        </div>
+
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Issue</th>
                 <th>Project</th>
-                <th>Owner</th>
+                <th>Employee</th>
+                <th>Assigned to</th>
                 <th>Severity</th>
                 <th>Status</th>
+                <th>Due</th>
                 <th>Date</th>
                 <th></th>
               </tr>
             </thead>
 
             <tbody>
-              {rows.map(x => (
-                <tr key={x.id}>
-                  <td><b>{x.type}</b></td>
-                  <td>{x.project}</td>
-                  <td>{x.owner}</td>
-                  <td>
-                    <span className={"severity " + x.severity.toLowerCase()}>
-                      {x.severity}
-                    </span>
-                  </td>
-                  <td><Status text={x.status} /></td>
-                  <td>{x.date}</td>
-                  <td>
-                    <button
-                      className="delete"
-                      onClick={() => remove("issues", x.id)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredRows.map(x => {
+                const overdue = x.dueDate && x.dueDate < today && !["Resolved", "Closed"].includes(x.status);
+                return (
+                  <tr key={x.id}>
+                    <td>
+                      <button className="name-link" onClick={() => setViewingIssue(x)}>
+                        <b>{x.type}</b>
+                      </button>
+                    </td>
+                    <td>{x.project}</td>
+                    <td>{x.owner}</td>
+                    <td>{x.assignedTo || "—"}</td>
+                    <td>
+                      <span className={"severity " + x.severity.toLowerCase()}>
+                        {x.severity}
+                      </span>
+                    </td>
+                    <td><Status text={x.status} /></td>
+                    <td className={overdue ? "danger-text" : undefined}>{x.dueDate || "—"}{overdue ? " (overdue)" : ""}</td>
+                    <td>{x.date}</td>
+                    <td>
+                      {canManage && (
+                        <button
+                          className="delete"
+                          onClick={() => remove("issues", x.id)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </Panel>
+
+      {viewingIssue && (
+        <IssueDetailModal
+          issue={rows.find(r => r.id === viewingIssue.id) || viewingIssue}
+          canManage={canManage}
+          onUpdate={onUpdate}
+          onComment={onComment}
+          onClose={() => setViewingIssue(null)}
+        />
+      )}
     </Page>
+  );
+}
+
+function IssueDetailModal({ issue, canManage, onUpdate, onComment, onClose }) {
+  const [resolution, setResolution] = useState(issue.resolution || "");
+  const [commentText, setCommentText] = useState("");
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal profile-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">ISSUE</p>
+            <h2>{issue.type}</h2>
+          </div>
+          <button className="icon-btn" type="button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+
+        <div className="modal-section">
+          <b>Description</b>
+          <p className="muted">{issue.description || "No description added."}</p>
+        </div>
+
+        <div className="modal-section">
+          <div className="report-controls">
+            <label>
+              Project
+              <input value={issue.project || ""} disabled />
+            </label>
+            <label>
+              Employee
+              <input value={issue.owner || ""} disabled />
+            </label>
+            <label>
+              Severity
+              <input value={issue.severity || ""} disabled />
+            </label>
+          </div>
+        </div>
+
+        {canManage ? (
+          <div className="modal-section">
+            <div className="report-controls">
+              <label>
+                Status
+                <select value={issue.status} onChange={e => onUpdate(issue.id, { status: e.target.value })}>
+                  <option value="Open">Open</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Resolved">Resolved</option>
+                  <option value="Closed">Closed</option>
+                </select>
+              </label>
+              <label>
+                Due date
+                <input type="date" value={issue.dueDate || ""} onChange={e => onUpdate(issue.id, { dueDate: e.target.value })} />
+              </label>
+            </div>
+          </div>
+        ) : (
+          <div className="modal-section">
+            <b>Status</b>
+            <Status text={issue.status} />
+          </div>
+        )}
+
+        <div className="modal-section">
+          <b>Resolution</b>
+          {canManage ? (
+            <>
+              <textarea
+                className="issue-resolution"
+                rows={3}
+                value={resolution}
+                onChange={e => setResolution(e.target.value)}
+                placeholder="What fixed this?"
+              />
+              <button className="secondary compact-btn" onClick={() => onUpdate(issue.id, { resolution })}>Save resolution</button>
+            </>
+          ) : (
+            <p className="muted">{issue.resolution || "Not resolved yet."}</p>
+          )}
+        </div>
+
+        <div className="modal-section">
+          <b>Comments</b>
+          {(issue.comments || []).length ? (
+            <ul className="comment-list">
+              {issue.comments.map(c => (
+                <li key={c.id}>
+                  <p>{c.text}</p>
+                  <small>{new Date(c.at).toLocaleString()}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">No comments yet.</p>
+          )}
+
+          {canManage && (
+            <div className="comment-form">
+              <input
+                type="text"
+                placeholder="Add a comment…"
+                value={commentText}
+                onChange={e => setCommentText(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && commentText.trim()) {
+                    onComment(issue.id, commentText);
+                    setCommentText("");
+                  }
+                }}
+              />
+              <button
+                className="secondary compact-btn"
+                onClick={() => {
+                  if (!commentText.trim()) return;
+                  onComment(issue.id, commentText);
+                  setCommentText("");
+                }}
+              >
+                Post
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -4227,17 +5351,34 @@ function SheetImport({ data, update, notify }) {
           const reviewed = person.filter(x => /review/i.test(x.type)).reduce((s, x) => s + (Number(x.worked) || 0), 0);
           const leave = records.some(x => x.date === today && x.name === name && x.project === "On Leave");
 
+          // Role, Errors, a manually-set Inactive status, and the member's
+          // id are yours to set — import must never silently reset them.
+          // Only Target/Completed/Reviewed/Active-vs-Away are recalculated
+          // from the sheet.
+          const existing = (data.team || []).find(
+            m => String(m.name).toLowerCase() === String(name).toLowerCase()
+          );
+
           return {
-            id: 1000 + i,
+            id: existing?.id ?? (1000 + i),
             name,
-            role: "Annotator",
+            role: existing?.role || "Annotator",
             target,
             completed,
             reviewed,
-            errors: 0,
-            status: leave ? "Away" : "Active"
+            errors: existing?.errors ?? 0,
+            status: existing?.status === "Inactive" ? "Inactive" : (leave ? "Away" : "Active")
           };
         });
+
+        // Existing team members this import's sheet has no row for at all
+        // (e.g. someone deactivated and removed from the sheet) are kept
+        // as-is instead of disappearing from the roster.
+        const importedNames = new Set(names.map(n => n.toLowerCase()));
+        const untouchedMembers = (data.team || []).filter(
+          m => !importedNames.has(String(m.name).toLowerCase())
+        );
+        const fullTeam = [...team, ...untouchedMembers];
 
         // Completed is summed across the WHOLE imported history (all dates),
         // not just the latest day, so status reflects true overall progress.
@@ -4257,7 +5398,10 @@ function SheetImport({ data, update, notify }) {
             completed: 0,
             target: Number(p.target) || 0,
             totalImages: Math.max(0, Number(p.totalImages ?? p.total) || 0),
-            deadline: p.deadline || ""
+            deadline: p.deadline || "",
+            archived: !!p.archived,
+            assignedEmployees: Array.isArray(p.assignedEmployees) ? p.assignedEmployees : [],
+            assignedReviewers: Array.isArray(p.assignedReviewers) ? p.assignedReviewers : []
           };
         });
 
@@ -4288,13 +5432,16 @@ function SheetImport({ data, update, notify }) {
             completed,
             remaining,
             status: getProjectStatus(totalImages, completed, remaining),
-            deadline: v.deadline
+            deadline: v.deadline,
+            archived: v.archived,
+            assignedEmployees: v.assignedEmployees,
+            assignedReviewers: v.assignedReviewers
           };
         });
 
         update({
           ...data,
-          team,
+          team: fullTeam,
           projects,
           sheetRecords: records,
           sheetFile: file.name,
@@ -4406,6 +5553,11 @@ function SheetImport({ data, update, notify }) {
         const commentIndex = findHeaderIndex(headers, [
           "comment", "comments", "remark", "remarks", "note", "notes"
         ]);
+        // Optional — most Accuracy Report sheets don't have this column yet,
+        // but if one does, Reviewer performance can use it automatically.
+        const reviewerIndex = findHeaderIndex(headers, [
+          "reviewer", "reviewed by", "qa reviewer", "review by"
+        ]);
 
         if (nameIndex === -1) {
           alert(`Could not find the Name column. Detected headers: ${headers.filter(Boolean).join(" | ")}`);
@@ -4439,6 +5591,7 @@ function SheetImport({ data, update, notify }) {
           const link = linkIndex >= 0 ? String(row[linkIndex] ?? "").trim() : "";
           const imagesUsed = imagesUsedIndex >= 0 ? String(row[imagesUsedIndex] ?? "").trim() : "";
           const comment = commentIndex >= 0 ? String(row[commentIndex] ?? "").trim() : "";
+          const reviewer = reviewerIndex >= 0 ? String(row[reviewerIndex] ?? "").trim() : "";
 
           records.push({
             id: `accuracy-${Date.now()}-${r}`,
@@ -4452,7 +5605,8 @@ function SheetImport({ data, update, notify }) {
             score,
             link,
             imagesUsed,
-            comment
+            comment,
+            reviewer
           });
         }
 
@@ -5029,8 +6183,154 @@ function Page({
   );
 }
 
-function ProjectEditModal({ project, onClose, onSubmit }) {
+function TeamProfileModal({ name, data, onClose }) {
+  const member = data.team.find(m => m.name === name) || {
+    name, role: "—", status: "—", target: 0, completed: 0, reviewed: 0, errors: 0
+  };
+
+  const myRecords = (data.sheetRecords || []).filter(r => r.name === name);
+  const workRecords = myRecords.filter(isWorkRow);
+
+  const assignedProjects = [...new Set(
+    workRecords.map(r => getConfiguredProjectName(r.project)).filter(Boolean)
+  )];
+
+  const allTimeCompleted = workRecords.reduce((s, r) => s + (Number(r.worked) || 0), 0);
+
+  const qa = (data.accuracyRecords || [])
+    .filter(r => r.name === name)
+    .reduce(
+      (acc, r) => {
+        acc.tp += Number(r.tp) || 0;
+        acc.fp += Number(r.fp) || 0;
+        acc.fn += Number(r.fn) || 0;
+        return acc;
+      },
+      { tp: 0, fp: 0, fn: 0 }
+    );
+  const qaDenom = qa.tp + qa.fp + qa.fn;
+  const qaAccuracy = qaDenom ? Math.round((qa.tp / qaDenom) * 100) : null;
+
+  // Attendance summary — up to the last 30 tracked days ending at the
+  // latest imported date, reusing the same logic as the Attendance page.
+  const latestDate = getLatestImportedDate(data);
+  const rangeEnd = latestDate || getTodayISO();
+  const endDate = dateKeyToLocalDate(rangeEnd);
+  let rangeStart = rangeEnd;
+  if (endDate) {
+    const d = new Date(endDate);
+    d.setDate(d.getDate() - 29);
+    rangeStart = toISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  const attendance = buildAttendanceMatrix(data, { start: rangeStart, end: rangeEnd });
+  const myRow = attendance.rows.find(r => r.name === name);
+  const attCounts = { Present: 0, Leave: 0, "Week Off": 0, Holiday: 0, "No data": 0 };
+  (myRow?.cells || []).forEach(c => {
+    attCounts[c.status] = (attCounts[c.status] || 0) + 1;
+  });
+  const trackedDays = attCounts.Present + attCounts.Leave + attCounts["No data"];
+  const attendancePct = trackedDays ? Math.round((attCounts.Present / trackedDays) * 100) : null;
+
+  // Performance history — this person's last 7 work-days.
+  const byDate = new Map();
+  workRecords.forEach(r => {
+    byDate.set(r.date, (byDate.get(r.date) || 0) + (Number(r.worked) || 0));
+  });
+  const history = [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-7);
+  const historyMax = Math.max(1, ...history.map(([, v]) => v));
+
+  // Rank today among the whole team, by today's completed count.
+  const ranked = [...data.team].sort((a, b) => (Number(b.completed) || 0) - (Number(a.completed) || 0));
+  const rankIndex = ranked.findIndex(m => m.name === name);
+  const rank = rankIndex >= 0 ? rankIndex + 1 : null;
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal profile-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="person">
+            <div className="mini-avatar">{name.slice(0, 1).toUpperCase()}</div>
+            <div>
+              <b>{name}</b>
+              <small>{member.role || "—"} • <Status text={member.status || "Active"} /></small>
+            </div>
+          </div>
+
+          <button className="icon-btn" type="button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+
+        <div className="profile-stats">
+          <div>
+            <span>Today</span>
+            <b>{Number(member.completed || 0).toLocaleString()}</b>
+            <small>of {Number(member.target || 0).toLocaleString()} target</small>
+          </div>
+          <div>
+            <span>All-time</span>
+            <b>{allTimeCompleted.toLocaleString()}</b>
+            <small>images worked</small>
+          </div>
+          <div>
+            <span>QA accuracy</span>
+            <b>{qaAccuracy != null ? `${qaAccuracy}%` : "—"}</b>
+            <small>{qaDenom ? `${qaDenom.toLocaleString()} reviewed` : "No data"}</small>
+          </div>
+          <div>
+            <span>Rank today</span>
+            <b>{rank ? `#${rank}` : "—"}</b>
+            <small>of {data.team.length}</small>
+          </div>
+          <div>
+            <span>Errors</span>
+            <b className={Number(member.errors) > 15 ? "danger-text" : "good-text"}>
+              {Number(member.errors) || 0}
+            </b>
+            <small>logged on roster</small>
+          </div>
+        </div>
+
+        <div className="modal-section">
+          <b>Assigned projects</b>
+          <p className="muted">{assignedProjects.length ? assignedProjects.join(", ") : "None on record"}</p>
+        </div>
+
+        <div className="modal-section">
+          <b>Attendance — last {trackedDays || 0} tracked day{trackedDays === 1 ? "" : "s"}</b>
+          <p className="muted">
+            {attendancePct != null ? `${attendancePct}% present` : "No attendance data yet"}
+            {attCounts.Leave ? ` • ${attCounts.Leave} on leave` : ""}
+            {attCounts["No data"] ? ` • ${attCounts["No data"]} unaccounted` : ""}
+          </p>
+        </div>
+
+        <div className="modal-section">
+          <b>Performance history</b>
+          {history.length ? (
+            <div className="bars">
+              {history.map(([date, value]) => (
+                <div className="bar-row" key={date}>
+                  <span>{date.slice(5)}</span>
+                  <div><i style={{ width: `${(value / historyMax) * 100}%` }} /></div>
+                  <b>{value.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No work history yet.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectEditModal({ project, team, onClose, onSubmit }) {
   const stats = getProjectStats(project);
+  const names = (team || []).map(t => t.name);
+  const assignedEmployees = project.assignedEmployees || [];
+  const assignedReviewers = project.assignedReviewers || [];
 
   return (
     <div className="modal-bg">
@@ -5099,6 +6399,30 @@ function ProjectEditModal({ project, onClose, onSubmit }) {
             />
           </label>
 
+          {names.length > 0 && (
+            <>
+              <label>Assigned employees</label>
+              <div className="checkbox-list">
+                {names.map(n => (
+                  <label key={`emp-${n}`} className="checkbox-item">
+                    <input type="checkbox" name="assignedEmployees" value={n} defaultChecked={assignedEmployees.includes(n)} />
+                    {n}
+                  </label>
+                ))}
+              </div>
+
+              <label>Assigned reviewers</label>
+              <div className="checkbox-list">
+                {names.map(n => (
+                  <label key={`rev-${n}`} className="checkbox-item">
+                    <input type="checkbox" name="assignedReviewers" value={n} defaultChecked={assignedReviewers.includes(n)} />
+                    {n}
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+
           <p className="muted project-edit-note">
             Remaining images and status are calculated automatically from total images and completed values.
           </p>
@@ -5143,7 +6467,7 @@ function TeamMemberModal({ member, onClose, onSubmit }) {
   );
 }
 
-function Modal({ type, onClose, onSubmit }) {
+function Modal({ type, team, onClose, onSubmit }) {
   const labels = {
     team: ["Add team member", "Name", "Role", "Target", "Completed"],
     project: ["Add project", "Project name", "Total number of images", "Daily target", "Completed", "Status"],
@@ -5151,6 +6475,7 @@ function Modal({ type, onClose, onSubmit }) {
   };
 
   const l = labels[type];
+  const names = (team || []).map(t => t.name);
 
   return (
     <div className="modal-bg">
@@ -5252,6 +6577,30 @@ function Modal({ type, onClose, onSubmit }) {
                 Deadline
                 <input name="deadline" type="date" />
               </label>
+
+              {names.length > 0 && (
+                <>
+                  <label>Assigned employees</label>
+                  <div className="checkbox-list">
+                    {names.map(n => (
+                      <label key={`emp-${n}`} className="checkbox-item">
+                        <input type="checkbox" name="assignedEmployees" value={n} />
+                        {n}
+                      </label>
+                    ))}
+                  </div>
+
+                  <label>Assigned reviewers</label>
+                  <div className="checkbox-list">
+                    {names.map(n => (
+                      <label key={`rev-${n}`} className="checkbox-item">
+                        <input type="checkbox" name="assignedReviewers" value={n} />
+                        {n}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -5274,6 +6623,26 @@ function Modal({ type, onClose, onSubmit }) {
                   <option>Medium</option>
                   <option>Low</option>
                 </select>
+              </label>
+
+              <label>
+                Description
+                <textarea name="description" rows={3} placeholder="What went wrong?" />
+              </label>
+
+              {names.length > 0 && (
+                <label>
+                  Assigned to
+                  <select name="assignedTo">
+                    <option value="">Unassigned</option>
+                    {names.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              )}
+
+              <label>
+                Due date
+                <input name="dueDate" type="date" />
               </label>
             </>
           )}
