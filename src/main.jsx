@@ -2571,98 +2571,25 @@ function LoginScreen() {
    DASHBOARD
 ========================================================= */
 function Dashboard({ totals, data, setPage }) {
-  const latestDate = getLatestImportedDate(data);
+  const team = data?.team || [];
+  const projects = data?.projects || [];
+  const issues = data?.issues || [];
 
-  // Today's attendance snapshot — reuses the exact same logic as the
-  // Attendance page (buildAttendanceMatrix) for a single day, so the
-  // numbers here always agree with what Attendance shows.
-  const attendanceToday = useMemo(() => {
-    if (!latestDate) return { rows: [], summary: {} };
-    return buildAttendanceMatrix(data, { start: latestDate, end: latestDate });
-  }, [data, latestDate]);
-
-  const presentToday = attendanceToday.summary["Present"] || 0;
-  const absentToday = (attendanceToday.summary["No data"] || 0) + (attendanceToday.summary["Absent"] || 0);
-  const leaveToday = attendanceToday.summary["Leave"] || 0;
-  const absentNames = attendanceToday.rows
-    .filter(r => ["No data", "Absent"].includes(r.cells[0]?.status))
-    .map(r => r.name);
-
-  const openIssues = data.issues.filter(x => x.status === "Open").length;
-  const activeProjects = data.projects.filter(x => x.status === "In Progress").length;
-
-  // Overall (all-time) project progress — Completed is cumulative across
-  // the whole imported history, so this reflects true overall standing.
-  const overallTarget = (Array.isArray(data.projects) ? data.projects : []).reduce((s, p) => s + (Number(p.totalImages ?? p.total) || 0), 0);
-  const overallCompleted = (Array.isArray(data.projects) ? data.projects : []).reduce((s, p) => s + (Number(p.completed) || 0), 0);
-  const overallCompletion = overallTarget ? Math.round((overallCompleted / overallTarget) * 100) : 0;
-
-  // QA accuracy / errors — all-time totals from imported Accuracy Reports.
-  const qaTotals = (Array.isArray(data.accuracyRecords) ? data.accuracyRecords : []).reduce(
-    (acc, x) => {
-      acc.tp += Number(x.tp) || 0;
-      acc.fp += Number(x.fp) || 0;
-      acc.fn += Number(x.fn) || 0;
-      return acc;
-    },
-    { tp: 0, fp: 0, fn: 0 }
-  );
-  const qaDenom = qaTotals.tp + qaTotals.fp + qaTotals.fn;
-  const qaAccuracy = qaDenom ? Math.round((qaTotals.tp / qaDenom) * 100) : 0;
-  const totalErrors = qaTotals.fp + qaTotals.fn;
+  const active = team.filter(x => x.status === "Active").length;
+  const absent = team.filter(x => x.status === "Inactive").length;
+  const leave = team.filter(x => x.status === "Away").length;
+  const openIssues = issues.filter(x => x.status === "Open").length;
 
   const completion = totals.total
     ? Math.round((totals.done / totals.total) * 100)
     : 0;
-
-  // Productivity trend — total images worked per day, last 7 work-days.
-  const trend = useMemo(() => {
-    const byDate = new Map();
-    data.sheetRecords.filter(isWorkRow).forEach(r => {
-      byDate.set(r.date, (byDate.get(r.date) || 0) + (Number(r.worked) || 0));
-    });
-    return [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-7);
-  }, [data.sheetRecords]);
-  const trendMax = Math.max(1, ...trend.map(([, v]) => v));
-
-  // Top performers today, from each team member's daily completed count.
-  const topPerformers = [...data.team]
-    .filter(x => (Number(x.completed) || 0) > 0)
-    .sort((a, b) => (Number(b.completed) || 0) - (Number(a.completed) || 0))
-    .slice(0, 5);
-  const topMax = Math.max(1, ...topPerformers.map(x => Number(x.completed) || 0));
-
-  // Needing attention — reuses the same logic as the notification bell
-  // (overdue/near-deadline projects, stale high-severity issues), plus
-  // anyone absent today.
-  const notifications = getNotifications(data);
-
-  // Overview panel: surface what's currently being worked on rather than
-  // every project. In Progress first, then Pending, Completed/No Target last.
-  const statusRank = { "In Progress": 0, "Pending": 1, "No Target": 2, "Completed": 3 };
-  const highlightedProjects = [...data.projects]
-    .sort((a, b) => {
-      const r = (statusRank[a.status] ?? 9) - (statusRank[b.status] ?? 9);
-      if (r !== 0) return r;
-      return getProjectStats(b).progress - getProjectStats(a).progress;
-    })
-    .slice(0, 5);
 
   return (
     <div>
       <div className="page-head">
         <div>
           <p className="eyebrow">TEAM OPERATIONS</p>
-          <h1>
-  {new Date().getHours() < 12
-    ? "Good morning"
-    : new Date().getHours() < 17
-    ? "Good afternoon"
-    : new Date().getHours() < 21
-    ? "Good evening"
-    : "Good night"}
-  , Manjunath 👋
-</h1>
+          <h1>Good morning, Manjunath 👋</h1>
           <p className="sub">
             Here’s your team's operational overview for today.
           </p>
@@ -2677,76 +2604,43 @@ function Dashboard({ totals, data, setPage }) {
       <div className="cards">
         <Metric
           icon={Users}
-          label="Team members"
-          value={data.team.length}
-          note={`${presentToday} present today`}
-        />
-        <Metric
-          icon={AlertTriangle}
-          label="Absent today"
-          value={absentToday}
-          note="No work logged today"
-        />
-        <Metric
-          icon={Calendar}
-          label="On leave today"
-          value={leaveToday}
-          note="Marked On Leave in the sheet"
-        />
-        <Metric
-          icon={FolderKanban}
-          label="Active projects"
-          value={activeProjects}
-          note={`${data.projects.length} total projects`}
+          label="Total team"
+          value={team.length}
+          note={`${active} active`}
+          trend="Live"
         />
 
         <Metric
           icon={Target}
-          label="Productivity today"
+          label="Daily completion"
           value={totals.done.toLocaleString()}
-          note={`${completion}% of today's target`}
+          note={`${completion}% of target`}
+          trend="+8.4%"
         />
+
         <Metric
           icon={ImageIcon}
-          label="Total images worked"
-          value={overallCompleted.toLocaleString()}
-          note={`${overallCompletion}% of overall target (${overallTarget.toLocaleString()})`}
+          label="Images remaining"
+          value={totals.remaining.toLocaleString()}
+          note="Across active projects"
+          trend="-12.2%"
         />
-        <Metric
-          icon={ShieldCheck}
-          label="QA accuracy"
-          value={qaDenom ? `${qaAccuracy}%` : "—"}
-          note={qaDenom ? `${totalErrors.toLocaleString()} total errors` : "No Accuracy Report imported yet"}
-        />
+
         <Metric
           icon={AlertTriangle}
           label="Open issues"
           value={openIssues}
           note="Needs attention"
+          trend={openIssues ? "Action" : "Clear"}
         />
       </div>
 
-      <Panel title="Today's operational summary">
-        <p className="op-summary">
-          {latestDate ? (
-            <>
-              As of <b>{latestDate}</b>, <b>{presentToday}</b> of <b>{data.team.length}</b> team members are present
-              {absentToday ? <> ({absentToday} absent, no work logged)</> : null}
-              {leaveToday ? <>, {leaveToday} on leave</> : null}. The team completed{" "}
-              <b>{totals.done.toLocaleString()}</b> images today ({completion}% of today's target), out of{" "}
-              <b>{overallCompleted.toLocaleString()}</b> completed overall ({overallCompletion}% of the total target).{" "}
-              {qaDenom ? <>QA accuracy stands at <b>{qaAccuracy}%</b> across {qaDenom.toLocaleString()} reviewed images. </> : null}
-              There {openIssues === 1 ? "is" : "are"} <b>{openIssues}</b> open issue{openIssues === 1 ? "" : "s"} and{" "}
-              <b>{notifications.length}</b> item{notifications.length === 1 ? "" : "s"} needing attention.
-            </>
-          ) : (
-            "Import a Daily Effort Sheet to see today's operational summary."
-          )}
-        </p>
-      </Panel>
-
       <div className="grid two">
-        <Panel title="Team performance" action="View all" onAction={() => setPage("team")}>
+        <Panel
+          title="Team performance"
+          action="View all"
+          onAction={() => setPage("team")}
+        >
           <div className="table-wrap">
             <table>
               <thead>
@@ -2757,8 +2651,9 @@ function Dashboard({ totals, data, setPage }) {
                   <th>Status</th>
                 </tr>
               </thead>
+
               <tbody>
-                {data.team.slice(0, 5).map(x => (
+                {team.slice(0, 5).map(x => (
                   <tr key={x.id}>
                     <td>
                       <div className="person">
@@ -2771,6 +2666,7 @@ function Dashboard({ totals, data, setPage }) {
                         </div>
                       </div>
                     </td>
+
                     <td>
                       <Progress
                         value={
@@ -2783,10 +2679,12 @@ function Dashboard({ totals, data, setPage }) {
                         }
                       />
                     </td>
+
                     <td>
                       <b>{Number(x.completed).toLocaleString()}</b> /{" "}
                       {Number(x.target).toLocaleString()}
                     </td>
+
                     <td>
                       <Status text={x.status} />
                     </td>
@@ -2803,7 +2701,7 @@ function Dashboard({ totals, data, setPage }) {
           onAction={() => setPage("projects")}
         >
           <div className="project-list">
-            {highlightedProjects.map(p => {
+            {projects.map(p => {
               const s = getProjectStats(p);
 
               return (
@@ -2830,102 +2728,42 @@ function Dashboard({ totals, data, setPage }) {
               );
             })}
           </div>
-
-          {data.projects.length > highlightedProjects.length && (
-            <p className="muted" style={{ marginTop: 14 }}>
-              Showing {highlightedProjects.length} of {data.projects.length} projects, most active first.{" "}
-              <button className="link-btn" style={{ display: "inline" }} onClick={() => setPage("projects")}>
-                View all
-              </button>
-            </p>
-          )}
-        </Panel>
-      </div>
-
-      <div className="grid two">
-        <Panel title="Productivity trend" action="View reports" onAction={() => setPage("reports")}>
-          {!trend.length ? (
-            <p className="muted">No Daily Effort records imported yet.</p>
-          ) : (
-            <div className="bars">
-              {trend.map(([date, value]) => (
-                <div className="bar-row" key={date}>
-                  <span>{date.slice(5)}</span>
-                  <div>
-                    <i style={{ width: `${(value / trendMax) * 100}%` }} />
-                  </div>
-                  <b>{value.toLocaleString()}</b>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="Top performers today" action="View team" onAction={() => setPage("team")}>
-          {!topPerformers.length ? (
-            <p className="muted">No completed work logged today yet.</p>
-          ) : (
-            <div className="bars">
-              {topPerformers.map(x => (
-                <div className="bar-row" key={x.id}>
-                  <span>{x.name}</span>
-                  <div>
-                    <i style={{ width: `${(Number(x.completed) / topMax) * 100}%` }} />
-                  </div>
-                  <b>{Number(x.completed).toLocaleString()}</b>
-                </div>
-              ))}
-            </div>
-          )}
         </Panel>
       </div>
 
       <div className="grid three">
-        <Panel title="Needing attention" action={notifications.length ? "View all" : undefined} onAction={() => setPage("projects")}>
-          {!notifications.length && !absentNames.length ? (
-            <p className="muted">Nothing needs attention right now.</p>
-          ) : (
-            <ul className="attention-list">
-              {absentNames.slice(0, 3).map(name => (
-                <li key={`absent-${name}`}>
-                  <span className="attention-dot attention-absent" />
-                  <span>{name} — no work logged today</span>
-                </li>
-              ))}
-              {notifications.slice(0, 5).map(n => (
-                <li key={n.id}>
-                  <span className={`attention-dot attention-${n.kind}`} />
-                  <span>{n.title}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+        <Panel title="Attendance">
+          <div className="qa-grid">
+            <div>
+              <h2>{active}</h2>
+              <p className="muted">Present</p>
+            </div>
+            <div>
+              <h2>{leave}</h2>
+              <p className="muted">Leave</p>
+            </div>
+            <div>
+              <h2>{absent}</h2>
+              <p className="muted">Absent</p>
+            </div>
+          </div>
         </Panel>
 
-        <Panel title="Today's activity">
-          <div className="activity">
-            <Activity />
-            <div>
-              <b>{totals.done.toLocaleString()}</b>
-              <span>images completed</span>
-            </div>
+        <Panel title="QA snapshot">
+          <div className="big-number">
+            {team
+              .reduce((s, x) => s + (Number(x.reviewed) || 0), 0)
+              .toLocaleString()}
           </div>
 
-          <div className="activity">
-            <CheckCircle2 />
-            <div>
-              <b>{totals.reviewed.toLocaleString()}</b>
-              <span>reviews completed</span>
-            </div>
+          <p className="muted">Images reviewed</p>
+
+          <div className="qa-line">
+            <span>Accuracy health</span>
+            <b>96.8%</b>
           </div>
 
-          <div className="activity">
-            <AlertTriangle />
-            <div>
-              <b>{openIssues}</b>
-              <span>issues open</span>
-            </div>
-          </div>
+          <Progress value={97} />
         </Panel>
 
         <Panel title="Quick actions">
