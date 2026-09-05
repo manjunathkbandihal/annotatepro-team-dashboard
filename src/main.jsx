@@ -710,6 +710,9 @@ function getLatestAccuracyDate(data) {
 
 const DEADLINE_WARNING_DAYS = 7;
 const STALE_HIGH_SEVERITY_DAYS = 2;
+const LOW_PRODUCTIVITY_THRESHOLD = 0.5;
+const QA_DROP_THRESHOLD = 10;
+const ATTENDANCE_ALERT_THRESHOLD = 0.3;
 
 function getTodayISO() {
   const d = new Date();
@@ -780,8 +783,74 @@ function getNotifications(data) {
     });
   });
 
-  // Overdue and long-open issues first, then soonest deadlines.
-  const rank = { overdue: 0, issue: 1, deadline: 2 };
+  // Low productivity — someone with a real target today is well under it.
+  (Array.isArray(data?.team) ? data.team : []).forEach(m => {
+    const target = Number(m.target) || 0;
+    const completed = Number(m.completed) || 0;
+    if (!target || m.status !== "Active") return;
+    const pct = completed / target;
+    if (pct < LOW_PRODUCTIVITY_THRESHOLD) {
+      items.push({
+        id: `productivity-${m.id}`,
+        kind: "productivity",
+        title: `${m.name} is at ${Math.round(pct * 100)}% of today's target`,
+        detail: `${completed.toLocaleString()} of ${target.toLocaleString()} images`,
+        date: today
+      });
+    } else if (target && completed >= target) {
+      items.push({
+        id: `achievement-${m.id}`,
+        kind: "achievement",
+        title: `${m.name} hit today's target`,
+        detail: `${completed.toLocaleString()} of ${target.toLocaleString()} images (${Math.round(pct * 100)}%)`,
+        date: today
+      });
+    }
+  });
+
+  // QA accuracy drop — this person's most recent Accuracy Report entry
+  // fell noticeably versus their entry before that.
+  const byQaName = new Map();
+  (Array.isArray(data?.accuracyRecords) ? data.accuracyRecords : []).forEach(r => {
+    if (!r.name || !r.date) return;
+    if (!byQaName.has(r.name)) byQaName.set(r.name, []);
+    byQaName.get(r.name).push(r);
+  });
+  byQaName.forEach((records, name) => {
+    const sorted = [...records].sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (sorted.length < 2) return;
+    const latest = sorted[sorted.length - 1];
+    const prev = sorted[sorted.length - 2];
+    const drop = (Number(prev.accuracy) || 0) - (Number(latest.accuracy) || 0);
+    if (drop >= QA_DROP_THRESHOLD) {
+      items.push({
+        id: `qa-${name}`,
+        kind: "qa",
+        title: `${name}'s QA accuracy dropped ${Math.round(drop)} points`,
+        detail: `${Number(prev.accuracy).toFixed(1)}% → ${Number(latest.accuracy).toFixed(1)}% (${latest.date})`,
+        date: latest.date
+      });
+    }
+  });
+
+  // Attendance alert — a meaningful share of the team unaccounted for today.
+  if (today && Array.isArray(data?.team) && data.team.length) {
+    const todayAttendance = buildAttendanceMatrix(data, { start: today, end: today });
+    const absent = (todayAttendance.summary["No data"] || 0) + (todayAttendance.summary.Absent || 0);
+    const pct = absent / data.team.length;
+    if (pct >= ATTENDANCE_ALERT_THRESHOLD) {
+      items.push({
+        id: `attendance-${today}`,
+        kind: "attendance",
+        title: `${absent} of ${data.team.length} team members unaccounted for today`,
+        detail: "No work logged and not on leave/week off/holiday",
+        date: today
+      });
+    }
+  }
+
+  // Overdue and long-open issues first, then everything else by recency.
+  const rank = { overdue: 0, issue: 1, attendance: 2, qa: 3, productivity: 4, deadline: 5, achievement: 6 };
   return items.sort((a, b) => {
     const r = (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9);
     if (r !== 0) return r;
@@ -1291,12 +1360,17 @@ function DashboardApp({ session, profile, onSignOut }) {
           projects: Array.isArray(cloud.projects)
             ? cloud.projects.map(p => {
                 const stats = getProjectStats(p);
-                return { ...p, ...stats, target: stats.total, total: stats.total };
+                // Keep p.target (Daily Target) exactly as saved — it is a
+                // separate number from Total Images and must not be
+                // overwritten here (same fix as loadData()).
+                return { ...p, ...stats };
               })
             : seed.projects,
           issues: Array.isArray(cloud.issues) ? cloud.issues : seed.issues,
           sheetRecords: Array.isArray(cloud.sheetRecords) ? cloud.sheetRecords : [],
           accuracyRecords: Array.isArray(cloud.accuracyRecords) ? cloud.accuracyRecords : [],
+          holidays: Array.isArray(cloud.holidays) ? cloud.holidays : [],
+          attendanceOverrides: Array.isArray(cloud.attendanceOverrides) ? cloud.attendanceOverrides : [],
           accuracyFile: cloud.accuracyFile || "",
           accuracyLastSync: cloud.accuracyLastSync || "",
           sheetFile: cloud.sheetFile || "",
@@ -1400,7 +1474,7 @@ function DashboardApp({ session, profile, onSignOut }) {
       });
     });
 
-    const remaining = data.projects.reduce(
+    const remaining = (Array.isArray(data.projects) ? data.projects : []).reduce(
       (s, x) => s + getProjectStats(x).remaining,
       0
     );
@@ -2519,12 +2593,12 @@ function Dashboard({ totals, data, setPage }) {
 
   // Overall (all-time) project progress — Completed is cumulative across
   // the whole imported history, so this reflects true overall standing.
-  const overallTarget = data.projects.reduce((s, p) => s + (Number(p.totalImages ?? p.total) || 0), 0);
-  const overallCompleted = data.projects.reduce((s, p) => s + (Number(p.completed) || 0), 0);
+  const overallTarget = (Array.isArray(data.projects) ? data.projects : []).reduce((s, p) => s + (Number(p.totalImages ?? p.total) || 0), 0);
+  const overallCompleted = (Array.isArray(data.projects) ? data.projects : []).reduce((s, p) => s + (Number(p.completed) || 0), 0);
   const overallCompletion = overallTarget ? Math.round((overallCompleted / overallTarget) * 100) : 0;
 
   // QA accuracy / errors — all-time totals from imported Accuracy Reports.
-  const qaTotals = data.accuracyRecords.reduce(
+  const qaTotals = (Array.isArray(data.accuracyRecords) ? data.accuracyRecords : []).reduce(
     (acc, x) => {
       acc.tp += Number(x.tp) || 0;
       acc.fp += Number(x.fp) || 0;
@@ -4600,7 +4674,7 @@ function Analytics({ data }) {
     0
   );
 
-  const totalTarget = data.team.reduce(
+  const totalTarget = (Array.isArray(data.team) ? data.team : []).reduce(
     (s, x) => s + (Number(x.target) || 0),
     0
   );
