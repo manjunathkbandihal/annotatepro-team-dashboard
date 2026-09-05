@@ -834,15 +834,15 @@ function getNotifications(data) {
   });
 
   // Attendance alert — a meaningful share of the team unaccounted for today.
-  if (today && Array.isArray(data?.team) && data.team.length) {
+  if (today && Array.isArray(data?.team) && (Array.isArray(data.team) ? data.team.length : 0)) {
     const todayAttendance = buildAttendanceMatrix(data, { start: today, end: today });
     const absent = (todayAttendance.summary["No data"] || 0) + (todayAttendance.summary.Absent || 0);
-    const pct = absent / data.team.length;
+    const pct = absent / (Array.isArray(data.team) ? data.team.length : 0);
     if (pct >= ATTENDANCE_ALERT_THRESHOLD) {
       items.push({
         id: `attendance-${today}`,
         kind: "attendance",
-        title: `${absent} of ${data.team.length} team members unaccounted for today`,
+        title: `${absent} of ${(Array.isArray(data.team) ? data.team.length : 0)} team members unaccounted for today`,
         detail: "No work logged and not on leave/week off/holiday",
         date: today
       });
@@ -901,13 +901,13 @@ function DateFilter({
 }) {
   const allDates = [
     ...(Array.isArray(data?.sheetRecords)
-      ? data.sheetRecords.map(x =>
+      ? (Array.isArray(data.sheetRecords) ? data.sheetRecords : []).map(x =>
           normalizeDateValue(x.date)
         )
       : []),
 
     ...(Array.isArray(data?.accuracyRecords)
-      ? data.accuracyRecords.map(x =>
+      ? (Array.isArray(data.accuracyRecords) ? data.accuracyRecords : []).map(x =>
           normalizeDateValue(x.date)
         )
       : [])
@@ -1438,7 +1438,7 @@ function DashboardApp({ session, profile, onSignOut }) {
 
   const filteredTeam = useMemo(
     () =>
-      data.team.filter(x =>
+      (Array.isArray(data.team) ? data.team : []).filter(x =>
         String(x.name || "").toLowerCase().includes(query.toLowerCase())
       ),
     [data.team, query]
@@ -1580,7 +1580,7 @@ function DashboardApp({ session, profile, onSignOut }) {
     const completed = Math.max(0, Math.min(totalImages, Number(f.get("completed") || 0)));
     const remaining = Math.max(0, totalImages - completed);
 
-    const projects = data.projects.map(project =>
+    const projects = (Array.isArray(data.projects) ? data.projects : []).map(project =>
       project.id === editingProject.id
         ? {
             ...project,
@@ -1607,13 +1607,13 @@ function DashboardApp({ session, profile, onSignOut }) {
   function archiveProject(id) {
     if (!canManageProjects) return notify("Only Admin or Team Lead can archive projects.");
 
-    const project = data.projects.find(p => p.id === id);
+    const project = (Array.isArray(data.projects) ? data.projects : []).find(p => p.id === id);
     if (!project) return;
     const archived = !project.archived;
 
     update({
       ...data,
-      projects: data.projects.map(p => (p.id === id ? { ...p, archived } : p))
+      projects: (Array.isArray(data.projects) ? data.projects : []).map(p => (p.id === id ? { ...p, archived } : p))
     });
     notify(archived ? `${project.name} archived` : `${project.name} unarchived`);
     logActivity(`${archived ? "Archived" : "Unarchived"} project "${project.name}"`);
@@ -1622,7 +1622,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   function updateIssue(id, changes) {
     if (!canManageIssues) return notify("Only Admin or Team Lead can update issues.");
 
-    const issues = data.issues.map(issue => {
+    const issues = (Array.isArray(data.issues) ? data.issues : []).map(issue => {
       if (issue.id !== id) return issue;
       const next = { ...issue, ...changes };
       // Stamp a resolved date automatically the moment status becomes
@@ -1638,12 +1638,12 @@ function DashboardApp({ session, profile, onSignOut }) {
     });
 
     update({ ...data, issues });
-    logActivity(`Updated issue "${data.issues.find(i => i.id === id)?.type || id}"`);
+    logActivity(`Updated issue "${(Array.isArray(data.issues) ? data.issues : []).find(i => i.id === id)?.type || id}"`);
   }
 
   function addIssueComment(id, text) {
     if (!text || !text.trim()) return;
-    const issue = data.issues.find(i => i.id === id);
+    const issue = (Array.isArray(data.issues) ? data.issues : []).find(i => i.id === id);
     if (!issue) return;
     const comments = [
       ...(Array.isArray(issue.comments) ? issue.comments : []),
@@ -1686,7 +1686,7 @@ function DashboardApp({ session, profile, onSignOut }) {
     };
 
     const nextTeam = editing
-      ? data.team.map(x => x.id === editing.id ? member : x)
+      ? (Array.isArray(data.team) ? data.team : []).map(x => x.id === editing.id ? member : x)
       : [...data.team, member];
 
     update({ ...data, team: nextTeam });
@@ -1701,9 +1701,9 @@ function DashboardApp({ session, profile, onSignOut }) {
 
     const next = {
       ...data,
-      team: data.team.filter(x => String(x.name).toLowerCase() !== String(name).toLowerCase()),
+      team: (Array.isArray(data.team) ? data.team : []).filter(x => String(x.name).toLowerCase() !== String(name).toLowerCase()),
       sheetRecords: Array.isArray(data.sheetRecords)
-        ? data.sheetRecords.filter(x => String(x.name).toLowerCase() !== String(name).toLowerCase())
+        ? (Array.isArray(data.sheetRecords) ? data.sheetRecords : []).filter(x => String(x.name).toLowerCase() !== String(name).toLowerCase())
         : data.sheetRecords
     };
 
@@ -1715,14 +1715,14 @@ function DashboardApp({ session, profile, onSignOut }) {
   function toggleMemberStatus(name) {
     if (!canManageTeam) return notify("Only Admin or Team Lead can deactivate team members.");
 
-    const member = data.team.find(x => String(x.name).toLowerCase() === String(name).toLowerCase());
+    const member = (Array.isArray(data.team) ? data.team : []).find(x => String(x.name).toLowerCase() === String(name).toLowerCase());
     if (!member) return;
 
     const nextStatus = member.status === "Inactive" ? "Active" : "Inactive";
 
     const next = {
       ...data,
-      team: data.team.map(x =>
+      team: (Array.isArray(data.team) ? data.team : []).map(x =>
         String(x.name).toLowerCase() === String(name).toLowerCase()
           ? { ...x, status: nextStatus }
           : x
@@ -1738,7 +1738,7 @@ function DashboardApp({ session, profile, onSignOut }) {
     if (!canManageTeam) return notify("Only Admin or Team Lead can clear imported data.");
     if (!confirm("Clear all imported sheet data and reset project completed counts? This cannot be undone.")) return;
 
-    const projects = data.projects.map(p => {
+    const projects = (Array.isArray(data.projects) ? data.projects : []).map(p => {
       const totalImages = Math.max(0, Number(p.totalImages ?? p.total) || 0);
       return {
         ...p,
@@ -2571,25 +2571,98 @@ function LoginScreen() {
    DASHBOARD
 ========================================================= */
 function Dashboard({ totals, data, setPage }) {
-  const team = data?.team || [];
-  const projects = data?.projects || [];
-  const issues = data?.issues || [];
+  const latestDate = getLatestImportedDate(data);
 
-  const active = team.filter(x => x.status === "Active").length;
-  const absent = team.filter(x => x.status === "Inactive").length;
-  const leave = team.filter(x => x.status === "Away").length;
-  const openIssues = issues.filter(x => x.status === "Open").length;
+  // Today's attendance snapshot — reuses the exact same logic as the
+  // Attendance page (buildAttendanceMatrix) for a single day, so the
+  // numbers here always agree with what Attendance shows.
+  const attendanceToday = useMemo(() => {
+    if (!latestDate) return { rows: [], summary: {} };
+    return buildAttendanceMatrix(data, { start: latestDate, end: latestDate });
+  }, [data, latestDate]);
+
+  const presentToday = attendanceToday.summary["Present"] || 0;
+  const absentToday = (attendanceToday.summary["No data"] || 0) + (attendanceToday.summary["Absent"] || 0);
+  const leaveToday = attendanceToday.summary["Leave"] || 0;
+  const absentNames = attendanceToday.rows
+    .filter(r => ["No data", "Absent"].includes(r.cells[0]?.status))
+    .map(r => r.name);
+
+  const openIssues = (Array.isArray(data.issues) ? data.issues : []).filter(x => x.status === "Open").length;
+  const activeProjects = (Array.isArray(data.projects) ? data.projects : []).filter(x => x.status === "In Progress").length;
+
+  // Overall (all-time) project progress — Completed is cumulative across
+  // the whole imported history, so this reflects true overall standing.
+  const overallTarget = (Array.isArray(data.projects) ? data.projects : []).reduce((s, p) => s + (Number(p.totalImages ?? p.total) || 0), 0);
+  const overallCompleted = (Array.isArray(data.projects) ? data.projects : []).reduce((s, p) => s + (Number(p.completed) || 0), 0);
+  const overallCompletion = overallTarget ? Math.round((overallCompleted / overallTarget) * 100) : 0;
+
+  // QA accuracy / errors — all-time totals from imported Accuracy Reports.
+  const qaTotals = (Array.isArray(data.accuracyRecords) ? data.accuracyRecords : []).reduce(
+    (acc, x) => {
+      acc.tp += Number(x.tp) || 0;
+      acc.fp += Number(x.fp) || 0;
+      acc.fn += Number(x.fn) || 0;
+      return acc;
+    },
+    { tp: 0, fp: 0, fn: 0 }
+  );
+  const qaDenom = qaTotals.tp + qaTotals.fp + qaTotals.fn;
+  const qaAccuracy = qaDenom ? Math.round((qaTotals.tp / qaDenom) * 100) : 0;
+  const totalErrors = qaTotals.fp + qaTotals.fn;
 
   const completion = totals.total
     ? Math.round((totals.done / totals.total) * 100)
     : 0;
+
+  // Productivity trend — total images worked per day, last 7 work-days.
+  const trend = useMemo(() => {
+    const byDate = new Map();
+    (Array.isArray(data.sheetRecords) ? data.sheetRecords : []).filter(isWorkRow).forEach(r => {
+      byDate.set(r.date, (byDate.get(r.date) || 0) + (Number(r.worked) || 0));
+    });
+    return [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-7);
+  }, [data.sheetRecords]);
+  const trendMax = Math.max(1, ...trend.map(([, v]) => v));
+
+  // Top performers today, from each team member's daily completed count.
+  const topPerformers = [...data.team]
+    .filter(x => (Number(x.completed) || 0) > 0)
+    .sort((a, b) => (Number(b.completed) || 0) - (Number(a.completed) || 0))
+    .slice(0, 5);
+  const topMax = Math.max(1, ...topPerformers.map(x => Number(x.completed) || 0));
+
+  // Needing attention — reuses the same logic as the notification bell
+  // (overdue/near-deadline projects, stale high-severity issues), plus
+  // anyone absent today.
+  const notifications = getNotifications(data);
+
+  // Overview panel: surface what's currently being worked on rather than
+  // every project. In Progress first, then Pending, Completed/No Target last.
+  const statusRank = { "In Progress": 0, "Pending": 1, "No Target": 2, "Completed": 3 };
+  const highlightedProjects = [...data.projects]
+    .sort((a, b) => {
+      const r = (statusRank[a.status] ?? 9) - (statusRank[b.status] ?? 9);
+      if (r !== 0) return r;
+      return getProjectStats(b).progress - getProjectStats(a).progress;
+    })
+    .slice(0, 5);
 
   return (
     <div>
       <div className="page-head">
         <div>
           <p className="eyebrow">TEAM OPERATIONS</p>
-          <h1>Good morning, Manjunath 👋</h1>
+          <h1>
+  {new Date().getHours() < 12
+    ? "Good morning"
+    : new Date().getHours() < 17
+    ? "Good afternoon"
+    : new Date().getHours() < 21
+    ? "Good evening"
+    : "Good night"}
+  , Manjunath 👋
+</h1>
           <p className="sub">
             Here’s your team's operational overview for today.
           </p>
@@ -2604,43 +2677,76 @@ function Dashboard({ totals, data, setPage }) {
       <div className="cards">
         <Metric
           icon={Users}
-          label="Total team"
-          value={team.length}
-          note={`${active} active`}
-          trend="Live"
+          label="Team members"
+          value={(Array.isArray(data.team) ? data.team.length : 0)}
+          note={`${presentToday} present today`}
+        />
+        <Metric
+          icon={AlertTriangle}
+          label="Absent today"
+          value={absentToday}
+          note="No work logged today"
+        />
+        <Metric
+          icon={Calendar}
+          label="On leave today"
+          value={leaveToday}
+          note="Marked On Leave in the sheet"
+        />
+        <Metric
+          icon={FolderKanban}
+          label="Active projects"
+          value={activeProjects}
+          note={`${(Array.isArray(data.projects) ? data.projects.length : 0)} total projects`}
         />
 
         <Metric
           icon={Target}
-          label="Daily completion"
+          label="Productivity today"
           value={totals.done.toLocaleString()}
-          note={`${completion}% of target`}
-          trend="+8.4%"
+          note={`${completion}% of today's target`}
         />
-
         <Metric
           icon={ImageIcon}
-          label="Images remaining"
-          value={totals.remaining.toLocaleString()}
-          note="Across active projects"
-          trend="-12.2%"
+          label="Total images worked"
+          value={overallCompleted.toLocaleString()}
+          note={`${overallCompletion}% of overall target (${overallTarget.toLocaleString()})`}
         />
-
+        <Metric
+          icon={ShieldCheck}
+          label="QA accuracy"
+          value={qaDenom ? `${qaAccuracy}%` : "—"}
+          note={qaDenom ? `${totalErrors.toLocaleString()} total errors` : "No Accuracy Report imported yet"}
+        />
         <Metric
           icon={AlertTriangle}
           label="Open issues"
           value={openIssues}
           note="Needs attention"
-          trend={openIssues ? "Action" : "Clear"}
         />
       </div>
 
+      <Panel title="Today's operational summary">
+        <p className="op-summary">
+          {latestDate ? (
+            <>
+              As of <b>{latestDate}</b>, <b>{presentToday}</b> of <b>{(Array.isArray(data.team) ? data.team.length : 0)}</b> team members are present
+              {absentToday ? <> ({absentToday} absent, no work logged)</> : null}
+              {leaveToday ? <>, {leaveToday} on leave</> : null}. The team completed{" "}
+              <b>{totals.done.toLocaleString()}</b> images today ({completion}% of today's target), out of{" "}
+              <b>{overallCompleted.toLocaleString()}</b> completed overall ({overallCompletion}% of the total target).{" "}
+              {qaDenom ? <>QA accuracy stands at <b>{qaAccuracy}%</b> across {qaDenom.toLocaleString()} reviewed images. </> : null}
+              There {openIssues === 1 ? "is" : "are"} <b>{openIssues}</b> open issue{openIssues === 1 ? "" : "s"} and{" "}
+              <b>{notifications.length}</b> item{notifications.length === 1 ? "" : "s"} needing attention.
+            </>
+          ) : (
+            "Import a Daily Effort Sheet to see today's operational summary."
+          )}
+        </p>
+      </Panel>
+
       <div className="grid two">
-        <Panel
-          title="Team performance"
-          action="View all"
-          onAction={() => setPage("team")}
-        >
+        <Panel title="Team performance" action="View all" onAction={() => setPage("team")}>
           <div className="table-wrap">
             <table>
               <thead>
@@ -2651,9 +2757,8 @@ function Dashboard({ totals, data, setPage }) {
                   <th>Status</th>
                 </tr>
               </thead>
-
               <tbody>
-                {team.slice(0, 5).map(x => (
+                {data.team.slice(0, 5).map(x => (
                   <tr key={x.id}>
                     <td>
                       <div className="person">
@@ -2666,7 +2771,6 @@ function Dashboard({ totals, data, setPage }) {
                         </div>
                       </div>
                     </td>
-
                     <td>
                       <Progress
                         value={
@@ -2679,12 +2783,10 @@ function Dashboard({ totals, data, setPage }) {
                         }
                       />
                     </td>
-
                     <td>
                       <b>{Number(x.completed).toLocaleString()}</b> /{" "}
                       {Number(x.target).toLocaleString()}
                     </td>
-
                     <td>
                       <Status text={x.status} />
                     </td>
@@ -2701,7 +2803,7 @@ function Dashboard({ totals, data, setPage }) {
           onAction={() => setPage("projects")}
         >
           <div className="project-list">
-            {projects.map(p => {
+            {highlightedProjects.map(p => {
               const s = getProjectStats(p);
 
               return (
@@ -2728,42 +2830,102 @@ function Dashboard({ totals, data, setPage }) {
               );
             })}
           </div>
+
+          {(Array.isArray(data.projects) ? data.projects.length : 0) > highlightedProjects.length && (
+            <p className="muted" style={{ marginTop: 14 }}>
+              Showing {highlightedProjects.length} of {(Array.isArray(data.projects) ? data.projects.length : 0)} projects, most active first.{" "}
+              <button className="link-btn" style={{ display: "inline" }} onClick={() => setPage("projects")}>
+                View all
+              </button>
+            </p>
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid two">
+        <Panel title="Productivity trend" action="View reports" onAction={() => setPage("reports")}>
+          {!trend.length ? (
+            <p className="muted">No Daily Effort records imported yet.</p>
+          ) : (
+            <div className="bars">
+              {trend.map(([date, value]) => (
+                <div className="bar-row" key={date}>
+                  <span>{date.slice(5)}</span>
+                  <div>
+                    <i style={{ width: `${(value / trendMax) * 100}%` }} />
+                  </div>
+                  <b>{value.toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Top performers today" action="View team" onAction={() => setPage("team")}>
+          {!topPerformers.length ? (
+            <p className="muted">No completed work logged today yet.</p>
+          ) : (
+            <div className="bars">
+              {topPerformers.map(x => (
+                <div className="bar-row" key={x.id}>
+                  <span>{x.name}</span>
+                  <div>
+                    <i style={{ width: `${(Number(x.completed) / topMax) * 100}%` }} />
+                  </div>
+                  <b>{Number(x.completed).toLocaleString()}</b>
+                </div>
+              ))}
+            </div>
+          )}
         </Panel>
       </div>
 
       <div className="grid three">
-        <Panel title="Attendance">
-          <div className="qa-grid">
-            <div>
-              <h2>{active}</h2>
-              <p className="muted">Present</p>
-            </div>
-            <div>
-              <h2>{leave}</h2>
-              <p className="muted">Leave</p>
-            </div>
-            <div>
-              <h2>{absent}</h2>
-              <p className="muted">Absent</p>
-            </div>
-          </div>
+        <Panel title="Needing attention" action={notifications.length ? "View all" : undefined} onAction={() => setPage("projects")}>
+          {!notifications.length && !absentNames.length ? (
+            <p className="muted">Nothing needs attention right now.</p>
+          ) : (
+            <ul className="attention-list">
+              {absentNames.slice(0, 3).map(name => (
+                <li key={`absent-${name}`}>
+                  <span className="attention-dot attention-absent" />
+                  <span>{name} — no work logged today</span>
+                </li>
+              ))}
+              {notifications.slice(0, 5).map(n => (
+                <li key={n.id}>
+                  <span className={`attention-dot attention-${n.kind}`} />
+                  <span>{n.title}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Panel>
 
-        <Panel title="QA snapshot">
-          <div className="big-number">
-            {team
-              .reduce((s, x) => s + (Number(x.reviewed) || 0), 0)
-              .toLocaleString()}
+        <Panel title="Today's activity">
+          <div className="activity">
+            <Activity />
+            <div>
+              <b>{totals.done.toLocaleString()}</b>
+              <span>images completed</span>
+            </div>
           </div>
 
-          <p className="muted">Images reviewed</p>
-
-          <div className="qa-line">
-            <span>Accuracy health</span>
-            <b>96.8%</b>
+          <div className="activity">
+            <CheckCircle2 />
+            <div>
+              <b>{totals.reviewed.toLocaleString()}</b>
+              <span>reviews completed</span>
+            </div>
           </div>
 
-          <Progress value={97} />
+          <div className="activity">
+            <AlertTriangle />
+            <div>
+              <b>{openIssues}</b>
+              <span>issues open</span>
+            </div>
+          </div>
         </Panel>
 
         <Panel title="Quick actions">
@@ -2990,10 +3152,10 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete, onToggleStatus
 
   const imported =
     Array.isArray(data.sheetRecords) &&
-    data.sheetRecords.length > 0;
+    (Array.isArray(data.sheetRecords) ? data.sheetRecords.length : 0) > 0;
 
   const latestDate = imported
-    ? [...new Set(data.sheetRecords.filter(isWorkRow).map(x => x.date).filter(Boolean))]
+    ? [...new Set((Array.isArray(data.sheetRecords) ? data.sheetRecords : []).filter(isWorkRow).map(x => x.date).filter(Boolean))]
         .sort()
         .pop()
     : null;
@@ -3183,7 +3345,7 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete, onToggleStatus
                           <button
                             className="secondary compact-btn"
                             onClick={() => {
-                              const member = data.team.find(m => String(m.name).toLowerCase() === String(x.name).toLowerCase());
+                              const member = (Array.isArray(data.team) ? data.team : []).find(m => String(m.name).toLowerCase() === String(x.name).toLowerCase());
                               onEdit(member || { id: x.id, name: x.name, role: x.role, target: target, completed, reviewed: Number(x.reviewed) || 0, errors: Number(x.errors) || 0, status: x.status || "Active" });
                             }}
                           >Edit</button>
@@ -3267,8 +3429,8 @@ const ATTENDANCE_STATUSES = ["Present", "Absent", "Leave", "Half Day", "Week Off
 function buildAttendanceMatrix(data, range) {
   const dates = listDatesInRange(range);
 
-  const names = (Array.isArray(data.team) && data.team.length)
-    ? data.team.map(t => t.name)
+  const names = (Array.isArray(data.team) && (Array.isArray(data.team) ? data.team.length : 0))
+    ? (Array.isArray(data.team) ? data.team : []).map(t => t.name)
     : [...new Set((Array.isArray(data.sheetRecords) ? data.sheetRecords : []).map(r => r.name))];
 
   const byKey = new Map();
@@ -3908,7 +4070,7 @@ function QA({ data }) {
           <div><h2>{totalFP.toLocaleString()}</h2><p className="muted">False positives (FP)</p></div>
           <div><h2>{totalFN.toLocaleString()}</h2><p className="muted">False negatives (FN)</p></div>
           <div><h2>{averageScore.toFixed(1)}</h2><p className="muted">Average score</p></div>
-          <div><h2>{data.issues.filter(x => x.status === "Open").length}</h2><p className="muted">Open QA issues</p></div>
+          <div><h2>{(Array.isArray(data.issues) ? data.issues : []).filter(x => x.status === "Open").length}</h2><p className="muted">Open QA issues</p></div>
         </div>
       </Panel>
 
@@ -4436,7 +4598,7 @@ function Analytics({ data }) {
   };
 
   const sheetRows = Array.isArray(data.sheetRecords)
-    ? data.sheetRecords.filter(x => {
+    ? (Array.isArray(data.sheetRecords) ? data.sheetRecords : []).filter(x => {
         const recordDate = normalizeDateValue(x.date);
 
         if (!recordDate || !normalizedRange.start || !normalizedRange.end) {
@@ -4451,7 +4613,7 @@ function Analytics({ data }) {
     : [];
 
   const accuracyRows = Array.isArray(data.accuracyRecords)
-    ? data.accuracyRecords.filter(x =>
+    ? (Array.isArray(data.accuracyRecords) ? data.accuracyRecords : []).filter(x =>
         isDateInRange(x.date, normalizedRange)
       )
     : [];
@@ -6009,7 +6171,7 @@ function SheetImport({ data, update, notify }) {
         </Panel>
       </div>
 
-      <Panel title={`Imported daily records ${data.sheetRecords?.length ? `(${data.sheetRecords.length})` : ""}`}>
+      <Panel title={`Imported daily records ${data.sheetRecords?.length ? `(${(Array.isArray(data.sheetRecords) ? data.sheetRecords.length : 0)})` : ""}`}>
         {preview.length === 0 && !data.sheetRecords?.length ? (
           <p className="muted">Upload the Daily Effort Excel file to preview and sync daily work.</p>
         ) : (
@@ -6464,7 +6626,7 @@ function Page({
 }
 
 function TeamProfileModal({ name, data, onClose }) {
-  const member = data.team.find(m => m.name === name) || {
+  const member = (Array.isArray(data.team) ? data.team : []).find(m => m.name === name) || {
     name, role: "—", status: "—", target: 0, completed: 0, reviewed: 0, errors: 0
   };
 
@@ -6560,7 +6722,7 @@ function TeamProfileModal({ name, data, onClose }) {
           <div>
             <span>Rank today</span>
             <b>{rank ? `#${rank}` : "—"}</b>
-            <small>of {data.team.length}</small>
+            <small>of {(Array.isArray(data.team) ? data.team.length : 0)}</small>
           </div>
           <div>
             <span>Errors</span>
