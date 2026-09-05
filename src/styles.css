@@ -646,3 +646,6 @@
   border-radius: 20px;
 }
 .date-preset-btn:hover { background: #f0eeff; color: #5e53d5; border-color: #d9d3ff; }
+
+/* Activity history load-more */
+.load-more-btn { margin-top: 10px; width: 100%; justify-content: center; }
