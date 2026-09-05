@@ -3956,7 +3956,13 @@ function QA({ data }) {
   const allAccuracyRows = Array.isArray(data.accuracyRecords) ? data.accuracyRecords : [];
   const accuracyRows = allAccuracyRows.filter(x => isDateInRange(x.date, range));
 
-  const totalDaily = accuracyRows.reduce((s, x) => s + (Number(x.dailyCount) || 0), 0);
+  // Your Accuracy Report's Comment column tags each row as "Annotation"
+  // or "Review" — that's what tells apart the two roles hiding in the
+  // same Name field, instead of needing a separate Reviewer column.
+  const isReviewRow = x => String(x.comment || "").trim() === "Review";
+  const isAnnotationRow = x => String(x.comment || "").trim() === "Annotation";
+
+  const totalDaily = accuracyRows.filter(isReviewRow).reduce((s, x) => s + (Number(x.dailyCount) || 0), 0);
   const totalTP = accuracyRows.reduce((s, x) => s + (Number(x.tp) || 0), 0);
   const totalFP = accuracyRows.reduce((s, x) => s + (Number(x.fp) || 0), 0);
   const totalFN = accuracyRows.reduce((s, x) => s + (Number(x.fn) || 0), 0);
@@ -3999,10 +4005,10 @@ function QA({ data }) {
   const weeklyTrend = accuracyByBucket(d => getWeekRange(d).start, 6);
   const monthlyTrend = accuracyByBucket(d => d.slice(0, 7), 6);
 
-  // Employee quality ranking with trend context, for this page specifically
-  // (Team page has a simpler top-5 version of this same idea).
+  // Employee quality ranking — Annotation rows only, so a person's
+  // reviewing work doesn't skew their own annotation-quality score.
   const byName = new Map();
-  allAccuracyRows.forEach(x => {
+  allAccuracyRows.filter(isAnnotationRow).forEach(x => {
     const key = x.name || "Unknown";
     if (!byName.has(key)) byName.set(key, { tp: 0, fp: 0, fn: 0, count: 0 });
     const e = byName.get(key);
@@ -4019,22 +4025,19 @@ function QA({ data }) {
     .filter(x => x.denom > 0)
     .sort((a, b) => b.accuracy - a.accuracy);
 
-  // Reviewer performance — only meaningful if the Accuracy Report sheet
-  // actually has a Reviewer column. Most don't yet, so this is honest
-  // about being empty rather than guessing who reviewed what.
-  const hasReviewerData = allAccuracyRows.some(x => x.reviewer);
+  // Reviewer performance — Review-marked rows' own Name is the reviewer,
+  // and that row's TP/FP/FN/dailyCount describe their reviewing work.
+  const reviewRowsAll = allAccuracyRows.filter(isReviewRow);
+  const hasReviewerData = reviewRowsAll.length > 0;
   const byReviewer = new Map();
-  if (hasReviewerData) {
-    allAccuracyRows.forEach(x => {
-      if (!x.reviewer) return;
-      const key = x.reviewer;
-      if (!byReviewer.has(key)) byReviewer.set(key, { reviewed: 0, errorsFound: 0, days: new Set() });
-      const r = byReviewer.get(key);
-      r.reviewed += Number(x.dailyCount) || 0;
-      r.errorsFound += (Number(x.fp) || 0) + (Number(x.fn) || 0);
-      if (x.date) r.days.add(x.date);
-    });
-  }
+  reviewRowsAll.forEach(x => {
+    const key = x.name || "Unknown";
+    if (!byReviewer.has(key)) byReviewer.set(key, { reviewed: 0, errorsFound: 0, days: new Set() });
+    const r = byReviewer.get(key);
+    r.reviewed += Number(x.dailyCount) || 0;
+    r.errorsFound += (Number(x.fp) || 0) + (Number(x.fn) || 0);
+    if (x.date) r.days.add(x.date);
+  });
   const reviewerRows = [...byReviewer.entries()]
     .map(([name, v]) => ({
       name,
@@ -4057,7 +4060,7 @@ function QA({ data }) {
       <DateFilter value={period} onChange={setPeriod} data={data} />
 
       <div className="cards">
-        <Metric icon={ClipboardCheck} label="Total reviewed" value={totalDaily.toLocaleString()} note="Daily Count in selected period" trend={accuracyRows.length ? "Live" : "Pending"} />
+        <Metric icon={ClipboardCheck} label="Total reviewed" value={totalDaily.toLocaleString()} note="Daily Count from Review rows only" trend={accuracyRows.length ? "Live" : "Pending"} />
         <Metric icon={CheckCircle2} label="Accuracy" value={`${calculatedAccuracy.toFixed(1)}%`} note={accuracyRows.length ? "From Accuracy Report" : "No report in selected period"} trend={accuracyRows.length ? "Good" : "Pending"} />
         <Metric icon={Target} label="Daily count" value={totalDaily.toLocaleString()} note="Images reported" trend={accuracyRows.length ? "Imported" : "Pending"} />
         <Metric icon={AlertTriangle} label="Total errors" value={totalErrors.toLocaleString()} note="FP + FN in selected period" trend={totalErrors ? "Monitor" : "Clear"} />
@@ -4166,8 +4169,7 @@ function QA({ data }) {
       <Panel title="Reviewer performance">
         {!hasReviewerData ? (
           <p className="muted">
-            Your Accuracy Report sheet doesn't have a "Reviewer" column, so there's no way to know who performed each review — this section can't show real data yet.
-            Add a Reviewer column to your sheet (any of these header names work: Reviewer, Reviewed By, QA Reviewer) and re-import to populate this automatically.
+            No rows in your Accuracy Report are marked "Review" in the Comment column yet, so there's nothing to show here. Once some rows have "Review" in Comment, this fills in automatically — no Reviewer column needed.
           </p>
         ) : (
           <div className="table-wrap">
