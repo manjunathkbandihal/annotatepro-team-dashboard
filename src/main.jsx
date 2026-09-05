@@ -217,7 +217,7 @@ function savePrefs(prefs) {
 ========================================================= */
 
 const ACTIVITY_KEY = "annotatepro-activity";
-const ACTIVITY_LIMIT = 50;
+const ACTIVITY_LIMIT = 200;
 
 function logActivity(message) {
   try {
@@ -5828,63 +5828,26 @@ function SheetImport({ data, update, notify }) {
           x => !["Saturday", "Sunday", "On Leave"].includes(x.project)
         );
 
-        // Only projects you've already created get their stats updated from
-        // the sheet — nothing new is auto-created here. Daily Target, Total
-        // Images and Deadline are never touched by import; only Completed
-        // and Status get recalculated from the sheet data.
-        const projectMap = {};
-        (data.projects || []).forEach(p => {
-          projectMap[String(p.name).toLowerCase()] = {
-            name: p.name,
-            id: p.id,
-            completed: 0,
-            target: Number(p.target) || 0,
-            totalImages: Math.max(0, Number(p.totalImages ?? p.total) || 0),
-            deadline: p.deadline || "",
-            archived: !!p.archived,
-            assignedEmployees: Array.isArray(p.assignedEmployees) ? p.assignedEmployees : [],
-            assignedReviewers: Array.isArray(p.assignedReviewers) ? p.assignedReviewers : []
-          };
-        });
-
+        // Projects are fully manual now — import never touches Completed,
+        // Status, Target, Total Images, Deadline, or anything else about
+        // them. It only checks which sheet project names don't match an
+        // existing project, so you know what to add yourself.
+        const projectNamesLower = new Set(
+          (data.projects || []).map(p => String(p.name).toLowerCase())
+        );
         const unmatchedProjectNames = new Set();
 
         workRecords.forEach(x => {
           const configuredName = getConfiguredProjectName(x.project);
           if (!configuredName) return;
-
-          const key = configuredName.toLowerCase();
-          if (!projectMap[key]) {
+          if (!projectNamesLower.has(configuredName.toLowerCase())) {
             unmatchedProjectNames.add(configuredName);
-            return; // no matching project — skip, don't auto-create
           }
-          projectMap[key].completed += Number(x.worked) || 0;
-        });
-
-        const projects = Object.values(projectMap).map(v => {
-          const totalImages = Math.max(0, Number(v.totalImages) || 0);
-          const completed = Math.max(0, Math.min(totalImages, Number(v.completed) || 0));
-          const remaining = Math.max(0, totalImages - completed);
-          return {
-            id: v.id,
-            name: v.name,
-            target: v.target,
-            totalImages,
-            total: totalImages,
-            completed,
-            remaining,
-            status: getProjectStatus(totalImages, completed, remaining),
-            deadline: v.deadline,
-            archived: v.archived,
-            assignedEmployees: v.assignedEmployees,
-            assignedReviewers: v.assignedReviewers
-          };
         });
 
         update({
           ...data,
           team: fullTeam,
-          projects,
           sheetRecords: records,
           sheetFile: file.name,
           sheetLastSync: new Date().toISOString()
@@ -6257,6 +6220,7 @@ function SettingsPage({
 }) {
   const [prefs, setPrefs] = useState(loadPrefs);
   const [activity, setActivity] = useState(getActivityLog);
+  const [visibleActivityCount, setVisibleActivityCount] = useState(10);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
 
   function updatePref(key, value) {
@@ -6269,6 +6233,7 @@ function SettingsPage({
     if (!confirm("Clear this device's activity history? This cannot be undone.")) return;
     clearActivityLog();
     setActivity([]);
+    setVisibleActivityCount(10);
   }
 
   return (
@@ -6424,14 +6389,25 @@ function SettingsPage({
         {activity.length === 0 ? (
           <p className="muted">No activity recorded on this device yet.</p>
         ) : (
-          <ul className="activity-list">
-            {activity.map(a => (
-              <li key={a.id}>
-                <span>{a.message}</span>
-                <small>{new Date(a.at).toLocaleString()}</small>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="activity-list">
+              {activity.slice(0, visibleActivityCount).map(a => (
+                <li key={a.id}>
+                  <span>{a.message}</span>
+                  <small>{new Date(a.at).toLocaleString()}</small>
+                </li>
+              ))}
+            </ul>
+
+            {visibleActivityCount < activity.length && (
+              <button
+                className="secondary compact-btn load-more-btn"
+                onClick={() => setVisibleActivityCount(v => v + 10)}
+              >
+                Load more ({activity.length - visibleActivityCount} more)
+              </button>
+            )}
+          </>
         )}
 
         <div className="settings-row-top">
