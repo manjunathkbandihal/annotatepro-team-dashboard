@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, FolderKanban, ClipboardCheck,
   AlertTriangle, BarChart3, Settings, Search, Plus, Bell,
   Download, Upload, Menu, X, CheckCircle2, Target,
-  Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
+  Image as ImageIcon, ChevronRight, ChevronLeft, Trash2, Activity, ShieldCheck,
   LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer,
   Calendar, Sun, Clock, Archive
 } from "lucide-react";
@@ -1846,9 +1846,13 @@ function DashboardApp({ session, profile, onSignOut }) {
           </div>
         )}
 
-        <button className="collapse" onClick={() => setSidebar(!sidebar)}>
-          {sidebar ? <ChevronRight size={18} /> : <Menu size={18} />}
-          <span>{sidebar ? "Collapse" : "Expand"}</span>
+        <button
+          className="sidebar-edge-toggle"
+          onClick={() => setSidebar(!sidebar)}
+          aria-label={sidebar ? "Collapse sidebar" : "Expand sidebar"}
+          title={sidebar ? "Collapse sidebar" : "Expand sidebar"}
+        >
+          {sidebar ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
         </button>
       </aside>
 
