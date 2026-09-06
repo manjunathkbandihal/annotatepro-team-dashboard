@@ -4089,20 +4089,13 @@ function QA({ data }) {
             (() => {
               const allFP = allAccuracyRows.reduce((s, x) => s + (Number(x.fp) || 0), 0);
               const allFN = allAccuracyRows.reduce((s, x) => s + (Number(x.fn) || 0), 0);
-              const maxErr = Math.max(1, allFP, allFN);
               return (
-                <div className="bars">
-                  <div className="bar-row">
-                    <span>False positives</span>
-                    <div><i style={{ width: `${(allFP / maxErr) * 100}%` }} /></div>
-                    <b>{allFP.toLocaleString()}</b>
-                  </div>
-                  <div className="bar-row">
-                    <span>False negatives</span>
-                    <div><i style={{ width: `${(allFN / maxErr) * 100}%` }} /></div>
-                    <b>{allFN.toLocaleString()}</b>
-                  </div>
-                </div>
+                <DonutChart
+                  segments={[
+                    { label: "False negatives", value: allFN, color: "#6659e3" },
+                    { label: "False positives", value: allFP, color: "#f0997b" }
+                  ]}
+                />
               );
             })()
           )}
@@ -4129,43 +4122,28 @@ function QA({ data }) {
       <div className="grid three">
         <Panel title="Daily QA trend">
           {!dailyTrend.length ? <p className="muted">No data yet.</p> : (
-            <div className="bars">
-              {dailyTrend.map(t => (
-                <div className="bar-row" key={t.key}>
-                  <span>{t.key.slice(5)}</span>
-                  <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
-                  <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
-                </div>
-              ))}
-            </div>
+            <LineChart
+              data={dailyTrend.map(t => ({ label: t.key.slice(5), value: t.pct }))}
+              formatValue={v => `${v}%`}
+            />
           )}
         </Panel>
 
         <Panel title="Weekly QA trend">
           {!weeklyTrend.length ? <p className="muted">No data yet.</p> : (
-            <div className="bars">
-              {weeklyTrend.map(t => (
-                <div className="bar-row" key={t.key}>
-                  <span>{t.key.slice(5)}</span>
-                  <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
-                  <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
-                </div>
-              ))}
-            </div>
+            <LineChart
+              data={weeklyTrend.map(t => ({ label: t.key.slice(5), value: t.pct }))}
+              formatValue={v => `${v}%`}
+            />
           )}
         </Panel>
 
         <Panel title="Monthly QA trend">
           {!monthlyTrend.length ? <p className="muted">No data yet.</p> : (
-            <div className="bars">
-              {monthlyTrend.map(t => (
-                <div className="bar-row" key={t.key}>
-                  <span>{t.key}</span>
-                  <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
-                  <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
-                </div>
-              ))}
-            </div>
+            <LineChart
+              data={monthlyTrend.map(t => ({ label: t.key, value: t.pct }))}
+              formatValue={v => `${v}%`}
+            />
           )}
         </Panel>
       </div>
@@ -4897,43 +4875,28 @@ function Analytics({ data }) {
       <div className="grid three">
         <Panel title="Daily productivity — last 14 days">
           {!dailyProductivity.length ? <p className="muted">No data yet.</p> : (
-            <div className="bars">
-              {dailyProductivity.map(([date, v]) => (
-                <div className="bar-row" key={date}>
-                  <span>{date.slice(5)}</span>
-                  <div><i style={{ width: `${(v / Math.max(1, ...dailyProductivity.map(([, x]) => x))) * 100}%` }} /></div>
-                  <b>{v.toLocaleString()}</b>
-                </div>
-              ))}
-            </div>
+            <ColumnChart
+              data={dailyProductivity.map(([date, v]) => ({ label: date.slice(5), value: v }))}
+              formatValue={v => v.toLocaleString()}
+            />
           )}
         </Panel>
 
         <Panel title="Weekly productivity — last 8 weeks">
           {!weeklyProductivity.length ? <p className="muted">No data yet.</p> : (
-            <div className="bars">
-              {weeklyProductivity.map(([week, v]) => (
-                <div className="bar-row" key={week}>
-                  <span>{week.slice(5)}</span>
-                  <div><i style={{ width: `${(v / Math.max(1, ...weeklyProductivity.map(([, x]) => x))) * 100}%` }} /></div>
-                  <b>{v.toLocaleString()}</b>
-                </div>
-              ))}
-            </div>
+            <ColumnChart
+              data={weeklyProductivity.map(([week, v]) => ({ label: week.slice(5), value: v }))}
+              formatValue={v => v.toLocaleString()}
+            />
           )}
         </Panel>
 
         <Panel title="Monthly productivity — last 6 months">
           {!monthlyProductivity.length ? <p className="muted">No data yet.</p> : (
-            <div className="bars">
-              {monthlyProductivity.map(([month, v]) => (
-                <div className="bar-row" key={month}>
-                  <span>{month}</span>
-                  <div><i style={{ width: `${(v / Math.max(1, ...monthlyProductivity.map(([, x]) => x))) * 100}%` }} /></div>
-                  <b>{v.toLocaleString()}</b>
-                </div>
-              ))}
-            </div>
+            <ColumnChart
+              data={monthlyProductivity.map(([month, v]) => ({ label: month, value: v }))}
+              formatValue={v => v.toLocaleString()}
+            />
           )}
         </Panel>
       </div>
@@ -5006,15 +4969,10 @@ function Analytics({ data }) {
           ) : (
             <>
               <p className="muted settings-note">Daily (last 10)</p>
-              <div className="bars">
-                {qaDailyTrend.map(t => (
-                  <div className="bar-row" key={t.key}>
-                    <span>{t.key.slice(5)}</span>
-                    <div><i style={{ width: `${t.pct ?? 0}%` }} /></div>
-                    <b>{t.pct != null ? `${t.pct}%` : "—"}</b>
-                  </div>
-                ))}
-              </div>
+              <LineChart
+                data={qaDailyTrend.map(t => ({ label: t.key.slice(5), value: t.pct }))}
+                formatValue={v => `${v}%`}
+              />
               <p className="muted settings-note" style={{ marginTop: 14 }}>
                 Project-wise and reviewer-wise QA trends aren't available — your Accuracy Report doesn't currently include a project or reviewer column. See QA & Reviews for the weekly/monthly breakdown.
               </p>
@@ -5588,6 +5546,89 @@ function Reports({ data }) {
         )}
       </div>
     </Page>
+  );
+}
+
+function ColumnChart({ data, formatValue }) {
+  const max = Math.max(1, ...data.map(d => d.value));
+  return (
+    <div className="column-chart">
+      {data.map(d => (
+        <div className="column-chart-col" key={d.label}>
+          <span className="column-chart-value">{formatValue ? formatValue(d.value) : d.value}</span>
+          <div className="column-chart-track">
+            <div className="column-chart-bar" style={{ height: `${(d.value / max) * 100}%` }} />
+          </div>
+          <span className="column-chart-label">{d.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LineChart({ data, formatValue }) {
+  const values = data.map(d => (d.value == null ? null : d.value));
+  const known = values.filter(v => v != null);
+  const max = Math.max(1, ...known);
+  const min = Math.min(0, ...known);
+  const span = Math.max(1, max - min);
+
+  const w = 100;
+  const h = 40;
+  const stepX = data.length > 1 ? w / (data.length - 1) : 0;
+  const points = values.map((v, i) => {
+    const x = i * stepX;
+    const y = v == null ? null : h - ((v - min) / span) * h;
+    return { x, y };
+  });
+  const validPoints = points.filter(p => p.y != null);
+  const linePath = validPoints.map(p => `${p.x},${p.y}`).join(" ");
+  const areaPath = validPoints.length
+    ? `${validPoints[0].x},${h} ${linePath} ${validPoints[validPoints.length - 1].x},${h}`
+    : "";
+
+  return (
+    <div className="line-chart">
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="line-chart-svg">
+        {areaPath && <polygon points={areaPath} className="line-chart-area" />}
+        {linePath && <polyline points={linePath} className="line-chart-line" />}
+        {validPoints.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r="1.6" className="line-chart-dot" />
+        ))}
+      </svg>
+      <div className="line-chart-labels">
+        {data.map((d, i) => (
+          <span key={i} title={d.value != null ? (formatValue ? formatValue(d.value) : d.value) : "No data"}>
+            {d.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DonutChart({ segments }) {
+  const total = Math.max(1, segments.reduce((s, x) => s + x.value, 0));
+  let cursor = 0;
+  const stops = segments.map(seg => {
+    const pct = (seg.value / total) * 100;
+    const stop = `${seg.color} ${cursor}% ${cursor + pct}%`;
+    cursor += pct;
+    return stop;
+  });
+
+  return (
+    <div className="donut-chart">
+      <div className="donut-chart-ring" style={{ background: `conic-gradient(${stops.join(", ")})` }} />
+      <div className="donut-chart-legend">
+        {segments.map(seg => (
+          <span key={seg.label}>
+            <i style={{ background: seg.color }} />
+            {seg.label} — {seg.value.toLocaleString()} ({Math.round((seg.value / total) * 100)}%)
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
