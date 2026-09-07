@@ -7,7 +7,7 @@ import {
   Download, Upload, Menu, X, CheckCircle2, Target,
   Image as ImageIcon, ChevronRight, ChevronLeft, Trash2, Activity, ShieldCheck,
   LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer,
-  Calendar, Sun, Clock, Archive
+  Calendar, Sun, Clock, Archive, Moon, PanelLeft
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
@@ -189,7 +189,8 @@ const PREFS_KEY = "annotatepro-prefs";
 
 const defaultPrefs = {
   landingPage: "dashboard",
-  reportRangeMode: "lastImportedWeek" // or "thisWeek"
+  reportRangeMode: "lastImportedWeek", // or "thisWeek"
+  theme: "light" // or "dark"
 };
 
 function loadPrefs() {
@@ -1170,6 +1171,10 @@ function App() {
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
 
   useEffect(() => {
+    document.documentElement.setAttribute("data-theme", loadPrefs().theme);
+  }, []);
+
+  useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
       setAuthLoading(false);
       return undefined;
@@ -1253,13 +1258,21 @@ function App() {
         role: normalizedRole
       });
 
-      // Self-heal missing emails: since every user logs in themselves,
-      // each login is a safe chance to record their own email on their
-      // own profile row (RLS already has to allow this — it's the same
-      // permission as updating your own name/role would need). This is
-      // what lets User & access show a real email instead of a raw ID,
-      // without needing any admin-only backend access.
-      if (user.email && row?.email !== user.email) {
+      // Self-heal the profiles row: since every user logs in themselves,
+      // each login is a safe chance to make sure their own row exists and
+      // has their current email. If Admin created this account through the
+      // Supabase dashboard, there is NO profiles row yet at all — this is
+      // what creates it, so the person actually shows up in Settings ->
+      // User & access instead of being invisible until someone notices.
+      if (!row) {
+        const { error: insertError } = await supabase
+          .from("profiles")
+          .upsert({ id: user.id, email: user.email, full_name: fallbackName, role: "member" });
+
+        if (insertError) {
+          console.warn("Could not create profile row on first login", insertError);
+        }
+      } else if (user.email && row.email !== user.email) {
         const { error: emailError } = await supabase
           .from("profiles")
           .update({ email: user.email })
@@ -1858,6 +1871,15 @@ function DashboardApp({ session, profile, onSignOut }) {
 
       <main className="main">
         <header className="topbar">
+          <button
+            className="icon-btn sidebar-toggle-btn"
+            onClick={() => setSidebar(!sidebar)}
+            aria-label={sidebar ? "Collapse sidebar" : "Expand sidebar"}
+            title={sidebar ? "Collapse sidebar" : "Expand sidebar"}
+          >
+            <PanelLeft size={19} />
+          </button>
+
           <div className="mobile-menu" onClick={() => setSidebar(!sidebar)}>
             <Menu />
           </div>
@@ -6274,6 +6296,9 @@ function SettingsPage({
     const next = { ...prefs, [key]: value };
     setPrefs(next);
     savePrefs(next);
+    if (key === "theme") {
+      document.documentElement.setAttribute("data-theme", value);
+    }
   }
 
   function handleClearActivity() {
@@ -6323,6 +6348,30 @@ function SettingsPage({
             <option value="lastImportedWeek">Latest imported week</option>
             <option value="thisWeek">This calendar week</option>
           </select>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <b>Theme</b>
+            <p>Light or dark mode for this browser. Applies immediately.</p>
+          </div>
+
+          <div className="theme-toggle">
+            <button
+              className={prefs.theme === "light" ? "active" : ""}
+              onClick={() => updatePref("theme", "light")}
+              type="button"
+            >
+              <Sun size={14} /> Light
+            </button>
+            <button
+              className={prefs.theme === "dark" ? "active" : ""}
+              onClick={() => updatePref("theme", "dark")}
+              type="button"
+            >
+              <Moon size={14} /> Dark
+            </button>
+          </div>
         </div>
 
         <p className="muted settings-note">
