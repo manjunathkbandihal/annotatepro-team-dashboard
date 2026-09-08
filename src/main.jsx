@@ -5,9 +5,9 @@ import {
   LayoutDashboard, Users, FolderKanban, ClipboardCheck,
   AlertTriangle, BarChart3, Settings, Search, Plus, Bell,
   Download, Upload, Menu, X, CheckCircle2, Target,
-  Image as ImageIcon, ChevronRight, ChevronLeft, Trash2, Activity, ShieldCheck,
+  Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
   LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer,
-  Calendar, Sun, Clock, Archive, Moon, PanelLeft
+  Calendar, Sun, Clock, Archive, Moon
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
@@ -1829,13 +1829,21 @@ function DashboardApp({ session, profile, onSignOut }) {
     <div className="app">
       <aside className={"sidebar " + (!sidebar ? "collapsed" : "")}>
         <div className="brand">
-          <div className="brand-mark">A</div>
+          {sidebar && <div className="brand-mark">A</div>}
           {sidebar && (
             <div>
               <b>AnnotatePro</b>
               <span>Team Operations</span>
             </div>
           )}
+          <button
+            className="sidebar-hamburger"
+            onClick={() => setSidebar(!sidebar)}
+            aria-label={sidebar ? "Collapse sidebar" : "Expand sidebar"}
+            title={sidebar ? "Collapse sidebar" : "Expand sidebar"}
+          >
+            <Menu size={18} />
+          </button>
         </div>
 
         <nav>
@@ -1858,32 +1866,10 @@ function DashboardApp({ session, profile, onSignOut }) {
             <p>Track annotation accuracy and resolve issues early.</p>
           </div>
         )}
-
-        <button
-          className="sidebar-edge-toggle"
-          onClick={() => setSidebar(!sidebar)}
-          aria-label={sidebar ? "Collapse sidebar" : "Expand sidebar"}
-          title={sidebar ? "Collapse sidebar" : "Expand sidebar"}
-        >
-          {sidebar ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
-        </button>
       </aside>
 
       <main className="main">
         <header className="topbar">
-          <button
-            className="icon-btn sidebar-toggle-btn"
-            onClick={() => setSidebar(!sidebar)}
-            aria-label={sidebar ? "Collapse sidebar" : "Expand sidebar"}
-            title={sidebar ? "Collapse sidebar" : "Expand sidebar"}
-          >
-            <PanelLeft size={19} />
-          </button>
-
-          <div className="mobile-menu" onClick={() => setSidebar(!sidebar)}>
-            <Menu />
-          </div>
-
           <div className="search">
             <Search size={18} />
             <input
