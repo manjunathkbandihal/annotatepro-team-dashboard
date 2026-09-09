@@ -2024,6 +2024,14 @@ function DashboardApp({ session, profile, onSignOut }) {
 
       <main className="main">
         <header className="topbar">
+          <button
+            className="mobile-reopen-btn"
+            onClick={() => setSidebar(true)}
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+
           <div className="search">
             <Search size={18} />
             <input
