@@ -7,7 +7,7 @@ import {
   Download, Upload, Menu, X, CheckCircle2, Target,
   Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
   LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer,
-  Calendar, Sun, Clock, Archive, Moon
+  Calendar, Sun, Clock, Archive, Moon, Trophy, ClipboardList
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
@@ -207,6 +207,25 @@ function savePrefs(prefs) {
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch {
     // localStorage unavailable — preferences just won't persist.
+  }
+}
+
+const REPORT_PRESETS_KEY = "annotatepro-report-presets";
+
+function loadReportPresets() {
+  try {
+    const raw = localStorage.getItem(REPORT_PRESETS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReportPresets(list) {
+  try {
+    localStorage.setItem(REPORT_PRESETS_KEY, JSON.stringify(list));
+  } catch {
+    // localStorage unavailable — presets just won't persist.
   }
 }
 
@@ -1313,6 +1332,104 @@ function DashboardApp({ session, profile, onSignOut }) {
   const [data, setData] = useState(loadData);
   const [dataReady, setDataReady] = useState(!isSupabaseConfigured);
   const [page, setPage] = useState(() => loadPrefs().landingPage || "dashboard");
+
+  // Keyboard shortcuts: press "g" then a letter to jump to a page, e.g.
+  // g d = Dashboard, g t = Team. Ignored while typing in a field, or with
+  // any modifier key held (so it never fights browser/OS shortcuts).
+  useEffect(() => {
+    const shortcutMap = {
+      d: "dashboard", t: "team", a: "attendance", p: "projects",
+      q: "qa", i: "issues", n: "analytics", r: "reports",
+      e: "recognition", s: "settings", u: "sheet"
+    };
+    let awaitingKey = false;
+    let timer = null;
+
+    function isTypingTarget(el) {
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+    }
+
+    function handleKeyDown(e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(document.activeElement)) return;
+
+      if (!awaitingKey) {
+        if (e.key.toLowerCase() === "g") {
+          awaitingKey = true;
+          clearTimeout(timer);
+          timer = setTimeout(() => { awaitingKey = false; }, 1200);
+        }
+        return;
+      }
+
+      awaitingKey = false;
+      clearTimeout(timer);
+      const target = shortcutMap[e.key.toLowerCase()];
+      if (target) {
+        e.preventDefault();
+        setPage(target);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      clearTimeout(timer);
+    };
+  }, []);
+
+  // Keyboard shortcuts: press "g" then a letter to jump to a page.
+  // Ignored while typing in any input/textarea/select, so it never
+  // interferes with normal typing.
+  useEffect(() => {
+    let awaitingSecondKey = false;
+    let resetTimer = null;
+
+    const shortcutMap = {
+      d: "dashboard",
+      t: "team",
+      a: "attendance",
+      p: "projects",
+      q: "qa",
+      i: "issues",
+      n: "analytics",
+      r: "reports",
+      e: "recognition",
+      s: "settings",
+      u: "sheet"
+    };
+
+    function handleKeyDown(e) {
+      const tag = document.activeElement?.tagName;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag) || document.activeElement?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const key = e.key.toLowerCase();
+
+      if (!awaitingSecondKey) {
+        if (key === "g") {
+          awaitingSecondKey = true;
+          clearTimeout(resetTimer);
+          resetTimer = setTimeout(() => { awaitingSecondKey = false; }, 1200);
+        }
+        return;
+      }
+
+      awaitingSecondKey = false;
+      clearTimeout(resetTimer);
+      if (shortcutMap[key]) {
+        setPage(shortcutMap[key]);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      clearTimeout(resetTimer);
+    };
+  }, []);
   const [query, setQuery] = useState("");
   const [sidebar, setSidebar] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -1445,6 +1562,8 @@ function DashboardApp({ session, profile, onSignOut }) {
     ["issues", "Issues", AlertTriangle],
     ["analytics", "Analytics", BarChart3],
     ["reports", "Reports", FileText],
+    ["recognition", "Recognition", Trophy],
+    ["planning", "Planning", ClipboardList],
     ["settings", "Settings", Settings],
     ["sheet", "Sheet Import", Upload]
   ];
@@ -1994,6 +2113,10 @@ function DashboardApp({ session, profile, onSignOut }) {
           {page === "analytics" && <Analytics data={data} />}
 
           {page === "reports" && <Reports data={data} />}
+
+          {page === "recognition" && <Recognition data={data} />}
+
+          {page === "planning" && <Planning data={data} />}
 
           {page === "settings" && (
             <SettingsPage
@@ -3036,6 +3159,20 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete, onToggleStatus
   const [roleFilter, setRoleFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState("all");
   const [sortBy, setSortBy] = useState("name");
+
+  // All-time completed, cumulative across the whole imported history —
+  // distinct from the day-specific "Completed" column, which only ever
+  // reflects the latest imported day.
+  const allTimeByName = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(data.sheetRecords) ? data.sheetRecords : [])
+      .filter(isWorkRow)
+      .forEach(r => {
+        map.set(r.name, (map.get(r.name) || 0) + (Number(r.worked) || 0));
+      });
+    return map;
+  }, [data.sheetRecords]);
+
   const projectRows = useMemo(() => {
     const records = Array.isArray(data.sheetRecords)
       ? data.sheetRecords
@@ -3290,6 +3427,7 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete, onToggleStatus
                 <th>Role</th>
                 <th>Target</th>
                 <th>Completed</th>
+                <th>All-time</th>
                 <th>Progress</th>
                 <th>Reviewed</th>
                 <th>Errors</th>
@@ -3323,6 +3461,7 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete, onToggleStatus
                     <td>{x.role}</td>
                     <td>{target ? target.toLocaleString() : "—"}</td>
                     <td><b>{completed.toLocaleString()}</b></td>
+                    <td>{(allTimeByName.get(x.name) || 0).toLocaleString()}</td>
 
                     <td>
                       <div style={{ minWidth: "100px" }}>
@@ -3697,9 +3836,34 @@ function Attendance({ data, update, canManage, notify }) {
 function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive }) {
   const [showArchived, setShowArchived] = useState(false);
   const [viewingProject, setViewingProject] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
 
   const visibleRows = rows.filter(p => (showArchived ? true : !p.archived));
   const archivedCount = rows.filter(p => p.archived).length;
+
+  function toggleSelect(id) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function bulkArchive() {
+    if (!confirm(`Archive ${selected.size} project${selected.size === 1 ? "" : "s"}?`)) return;
+    selected.forEach(id => {
+      const p = rows.find(x => x.id === id);
+      if (p && !p.archived) onArchive(id);
+    });
+    setSelected(new Set());
+  }
+
+  function bulkDelete() {
+    if (!confirm(`Delete ${selected.size} project${selected.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    selected.forEach(id => remove("projects", id));
+    setSelected(new Set());
+  }
 
   return (
     <Page
@@ -3715,6 +3879,15 @@ function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive 
         </label>
       )}
 
+      {canManage && selected.size > 0 && (
+        <div className="bulk-actions-bar">
+          <span>{selected.size} selected</span>
+          <button className="secondary compact-btn" onClick={bulkArchive}><Archive size={14} /> Archive</button>
+          <button className="secondary danger compact-btn" onClick={bulkDelete}><Trash2 size={14} /> Delete</button>
+          <button className="link-btn" onClick={() => setSelected(new Set())}>Clear selection</button>
+        </div>
+      )}
+
       <div className="project-cards">
         {visibleRows.map(p => {
           const s = getProjectStats(p);
@@ -3722,9 +3895,20 @@ function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive 
           return (
             <div className={`project-card ${p.archived ? "project-card-archived" : ""}`} key={p.id}>
               <div className="project-card-top">
-                <div className="project-icon">
-                  <FolderKanban />
-                </div>
+                {canManage ? (
+                  <label className="project-select">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.id)}
+                      onChange={() => toggleSelect(p.id)}
+                      aria-label={`Select ${p.name}`}
+                    />
+                  </label>
+                ) : (
+                  <div className="project-icon">
+                    <FolderKanban />
+                  </div>
+                )}
 
                 {canManage && (
                   <div className="project-card-actions">
@@ -4236,6 +4420,7 @@ function Issues({ rows, data, remove, openAdd, canManage, onUpdate, onComment })
   const [severityFilter, setSeverityFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState({ mode: "range", start: "", end: "" });
   const [viewingIssue, setViewingIssue] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
 
   const projectOptions = [...new Set(rows.map(x => x.project).filter(Boolean))].sort();
   const ownerOptions = [...new Set(rows.map(x => x.owner).filter(Boolean))].sort();
@@ -4363,10 +4548,42 @@ function Issues({ rows, data, remove, openAdd, canManage, onUpdate, onComment })
           <DateFilter value={dateFilter} onChange={setDateFilter} data={data} />
         </div>
 
+        {canManage && selectedIds.length > 0 && (
+          <div className="bulk-bar">
+            <span>{selectedIds.length} selected</span>
+            <button className="secondary compact-btn" onClick={() => { selectedIds.forEach(id => onUpdate(id, { status: "Resolved" })); setSelectedIds([]); }}>
+              Mark Resolved
+            </button>
+            <button className="secondary compact-btn" onClick={() => { selectedIds.forEach(id => onUpdate(id, { status: "Closed" })); setSelectedIds([]); }}>
+              Mark Closed
+            </button>
+            <button
+              className="secondary danger compact-btn"
+              onClick={() => {
+                if (!confirm(`Delete ${selectedIds.length} issue${selectedIds.length === 1 ? "" : "s"}?`)) return;
+                selectedIds.forEach(id => remove("issues", id));
+                setSelectedIds([]);
+              }}
+            >
+              Delete
+            </button>
+            <button className="link-btn" onClick={() => setSelectedIds([])}>Clear</button>
+          </div>
+        )}
+
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
+                {canManage && (
+                  <th>
+                    <input
+                      type="checkbox"
+                      checked={filteredRows.length > 0 && selectedIds.length === filteredRows.length}
+                      onChange={e => setSelectedIds(e.target.checked ? filteredRows.map(x => x.id) : [])}
+                    />
+                  </th>
+                )}
                 <th>Issue</th>
                 <th>Project</th>
                 <th>Employee</th>
@@ -4384,6 +4601,19 @@ function Issues({ rows, data, remove, openAdd, canManage, onUpdate, onComment })
                 const overdue = x.dueDate && x.dueDate < today && !["Resolved", "Closed"].includes(x.status);
                 return (
                   <tr key={x.id}>
+                    {canManage && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(x.id)}
+                          onChange={e =>
+                            setSelectedIds(prev =>
+                              e.target.checked ? [...prev, x.id] : prev.filter(id => id !== x.id)
+                            )
+                          }
+                        />
+                      </td>
+                    )}
                     <td>
                       <button className="name-link" onClick={() => setViewingIssue(x)}>
                         <b>{x.type}</b>
@@ -5384,6 +5614,46 @@ function Reports({ data }) {
   const [projectFilter, setProjectFilter] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [showDetail, setShowDetail] = useState(false);
+  const [presets, setPresets] = useState(loadReportPresets);
+  const [presetName, setPresetName] = useState("");
+
+  function saveCurrentAsPreset() {
+    const name = presetName.trim();
+    if (!name) return;
+    const preset = {
+      id: Date.now(),
+      name,
+      reportType,
+      singleDate,
+      weekDate,
+      monthValue,
+      customFilter,
+      projectFilter,
+      employeeFilter,
+      showDetail
+    };
+    const next = [...presets, preset];
+    setPresets(next);
+    saveReportPresets(next);
+    setPresetName("");
+  }
+
+  function applyPreset(preset) {
+    setReportType(preset.reportType);
+    setSingleDate(preset.singleDate);
+    setWeekDate(preset.weekDate);
+    setMonthValue(preset.monthValue);
+    setCustomFilter(preset.customFilter);
+    setProjectFilter(preset.projectFilter);
+    setEmployeeFilter(preset.employeeFilter);
+    setShowDetail(preset.showDetail);
+  }
+
+  function deletePreset(id) {
+    const next = presets.filter(p => p.id !== id);
+    setPresets(next);
+    saveReportPresets(next);
+  }
 
   const range = useMemo(() => {
     if (reportType === "daily") {
@@ -5435,6 +5705,21 @@ function Reports({ data }) {
       title="Reports"
       subtitle="Build a report, preview it, then export to Excel, CSV, or print/PDF."
     >
+      {presets.length > 0 && (
+        <Panel title="Saved presets">
+          <div className="preset-list">
+            {presets.map(p => (
+              <div className="preset-chip" key={p.id}>
+                <button className="preset-chip-name" onClick={() => applyPreset(p)}>{p.name}</button>
+                <button className="preset-chip-delete" onClick={() => deletePreset(p.id)} aria-label={`Delete preset ${p.name}`}>
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
       <Panel title="Report builder">
         <div className="report-controls">
           <label>
@@ -5501,6 +5786,19 @@ function Reports({ data }) {
               </select>
             </label>
           )}
+        </div>
+
+        <div className="preset-save-row">
+          <input
+            type="text"
+            placeholder="Name this setup to save it…"
+            value={presetName}
+            onChange={e => setPresetName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") saveCurrentAsPreset(); }}
+          />
+          <button className="secondary compact-btn" onClick={saveCurrentAsPreset} disabled={!presetName.trim()}>
+            <Save size={14} /> Save preset
+          </button>
         </div>
 
         <div className="report-actions">
@@ -5640,6 +5938,312 @@ function DonutChart({ segments }) {
   );
 }
 
+function Recognition({ data }) {
+  const latestDate = getLatestImportedDate(data);
+  const thisWeek = getWeekRange(latestDate || getTodayISO());
+  const lastWeekAnchor = (() => {
+    const d = dateKeyToLocalDate(thisWeek.start);
+    if (!d) return null;
+    d.setDate(d.getDate() - 7);
+    return toISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  })();
+  const lastWeek = lastWeekAnchor ? getWeekRange(lastWeekAnchor) : { start: "", end: "" };
+
+  const thisWeekReport = buildTimeReport(data, thisWeek);
+  const lastWeekReport = buildTimeReport(data, lastWeek);
+
+  const lastWeekByName = new Map(lastWeekReport.summary.map(x => [x.Name, x["Images Worked"]]));
+
+  // Top performer — this week, by images worked.
+  const topPerformer = [...thisWeekReport.summary].sort((a, b) => b["Images Worked"] - a["Images Worked"])[0];
+
+  // Best quality — all-time accuracy, Annotation rows only (same rule as QA page).
+  const isAnnotationRow = x => String(x.comment || "").trim() === "Annotation" || !x.comment;
+  const qaByName = new Map();
+  (data.accuracyRecords || []).filter(isAnnotationRow).forEach(x => {
+    const key = x.name || "Unknown";
+    if (!qaByName.has(key)) qaByName.set(key, { tp: 0, fp: 0, fn: 0 });
+    const e = qaByName.get(key);
+    e.tp += Number(x.tp) || 0;
+    e.fp += Number(x.fp) || 0;
+    e.fn += Number(x.fn) || 0;
+  });
+  const qualityRanked = [...qaByName.entries()]
+    .map(([name, v]) => {
+      const denom = v.tp + v.fp + v.fn;
+      return { name, accuracy: denom ? Math.round((v.tp / denom) * 100) : 0, denom };
+    })
+    .filter(x => x.denom > 0)
+    .sort((a, b) => b.accuracy - a.accuracy);
+  const bestQuality = qualityRanked[0];
+
+  // Most productive — all-time cumulative images worked.
+  const allTimeByName = new Map();
+  (data.sheetRecords || []).filter(isWorkRow).forEach(r => {
+    allTimeByName.set(r.name, (allTimeByName.get(r.name) || 0) + (Number(r.worked) || 0));
+  });
+  const mostProductiveRanked = [...allTimeByName.entries()]
+    .map(([name, total]) => ({ name, total }))
+    .sort((a, b) => b.total - a.total);
+  const mostProductive = mostProductiveRanked[0];
+
+  // Best attendance — this calendar month, present %.
+  const monthRange = getMonthRange((latestDate || getTodayISO()).slice(0, 7));
+  const attendanceMatrix = buildAttendanceMatrix(data, monthRange);
+  const attendanceRanked = attendanceMatrix.rows
+    .map(row => {
+      const counts = { Present: 0, "Half Day": 0 };
+      let workingSlots = 0;
+      row.cells.forEach(c => {
+        if (["Week Off", "Holiday"].includes(c.status)) return;
+        workingSlots += 1;
+        if (c.status === "Present") counts.Present += 1;
+        if (c.status === "Half Day") counts["Half Day"] += 1;
+      });
+      const pct = workingSlots ? Math.round(((counts.Present + counts["Half Day"] * 0.5) / workingSlots) * 100) : null;
+      return { name: row.name, pct };
+    })
+    .filter(x => x.pct != null)
+    .sort((a, b) => b.pct - a.pct);
+  const bestAttendance = attendanceRanked[0];
+
+  // Most improved — this week vs last week, biggest % increase (needs a
+  // real prior week to compare against, and a non-trivial prior baseline).
+  const improvedRanked = thisWeekReport.summary
+    .map(x => {
+      const prior = lastWeekByName.get(x.Name) || 0;
+      if (prior < 10) return null; // avoid divide-by-near-zero noise
+      const change = Math.round(((x["Images Worked"] - prior) / prior) * 100);
+      return { name: x.Name, change, from: prior, to: x["Images Worked"] };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.change - a.change);
+  const mostImproved = improvedRanked[0];
+
+  // Combined leaderboard — simple weighted score blending productivity
+  // rank, quality rank, and attendance rank where data exists for each.
+  const names = [...new Set([
+    ...mostProductiveRanked.map(x => x.name),
+    ...qualityRanked.map(x => x.name),
+    ...attendanceRanked.map(x => x.name)
+  ])];
+  const rankOf = (list, name) => {
+    const i = list.findIndex(x => x.name === name);
+    return i >= 0 ? i + 1 : null;
+  };
+  const leaderboard = names
+    .map(name => {
+      const prodRank = rankOf(mostProductiveRanked, name);
+      const qualRank = rankOf(qualityRanked, name);
+      const attRank = rankOf(attendanceRanked, name);
+      const ranks = [prodRank, qualRank, attRank].filter(r => r != null);
+      const score = ranks.length ? ranks.reduce((s, r) => s + r, 0) / ranks.length : null;
+      return { name, prodRank, qualRank, attRank, score };
+    })
+    .filter(x => x.score != null)
+    .sort((a, b) => a.score - b.score);
+
+  const BadgeCard = ({ icon: Icon, title, name, detail, color }) => (
+    <div className="badge-card">
+      <div className="badge-icon" style={{ background: color }}><Icon size={20} /></div>
+      <div>
+        <p className="badge-title">{title}</p>
+        {name ? (
+          <>
+            <b className="badge-name">{name}</b>
+            <p className="badge-detail">{detail}</p>
+          </>
+        ) : (
+          <p className="badge-detail">Not enough data yet</p>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <Page
+      title="Recognition"
+      subtitle="Who's standing out this week and overall — computed automatically from your existing data."
+    >
+      <div className="badge-grid">
+        <BadgeCard
+          icon={Trophy}
+          title="Top performer — this week"
+          name={topPerformer?.Name}
+          detail={topPerformer ? `${topPerformer["Images Worked"].toLocaleString()} images worked` : ""}
+          color="#f0997b"
+        />
+        <BadgeCard
+          icon={ShieldCheck}
+          title="Best quality — all-time"
+          name={bestQuality?.name}
+          detail={bestQuality ? `${bestQuality.accuracy}% accuracy` : ""}
+          color="#5fb0e8"
+        />
+        <BadgeCard
+          icon={Activity}
+          title="Most productive — all-time"
+          name={mostProductive?.name}
+          detail={mostProductive ? `${mostProductive.total.toLocaleString()} images total` : ""}
+          color="#6659e3"
+        />
+        <BadgeCard
+          icon={CheckCircle2}
+          title="Best attendance — this month"
+          name={bestAttendance?.name}
+          detail={bestAttendance ? `${bestAttendance.pct}% present` : ""}
+          color="#3ec98a"
+        />
+        <BadgeCard
+          icon={Target}
+          title="Most improved — vs last week"
+          name={mostImproved?.name}
+          detail={mostImproved ? `${mostImproved.change > 0 ? "+" : ""}${mostImproved.change}% (${mostImproved.from.toLocaleString()} → ${mostImproved.to.toLocaleString()})` : ""}
+          color="#e2a43d"
+        />
+      </div>
+
+      <Panel title="Team leaderboard">
+        {!leaderboard.length ? (
+          <p className="muted">Not enough imported data yet to rank the team.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Name</th>
+                  <th>Productivity rank</th>
+                  <th>Quality rank</th>
+                  <th>Attendance rank</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaderboard.map((x, i) => (
+                  <tr key={x.name}>
+                    <td><span className="rank-num">{i + 1}</span></td>
+                    <td><b>{x.name}</b></td>
+                    <td>{x.prodRank ? `#${x.prodRank}` : "—"}</td>
+                    <td>{x.qualRank ? `#${x.qualRank}` : "—"}</td>
+                    <td>{x.attRank ? `#${x.attRank}` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="muted settings-note">
+          Combined rank averages each person's standing across productivity (all-time images), quality (all-time accuracy), and attendance (this month) — lower is better. Only counted where data exists for that category.
+        </p>
+      </Panel>
+    </Page>
+  );
+}
+
+function Planning({ data }) {
+  const activeProjects = (data.projects || []).filter(p => !p.archived);
+
+  // Workload per employee — derived from the manual assignedEmployees /
+  // assignedReviewers fields on each project (never auto-inferred from
+  // who happened to work on something, matching how Projects works).
+  const byEmployee = new Map();
+  (data.team || []).forEach(m => byEmployee.set(m.name, { name: m.name, projects: [], target: 0 }));
+
+  activeProjects.forEach(p => {
+    (p.assignedEmployees || []).forEach(name => {
+      if (!byEmployee.has(name)) byEmployee.set(name, { name, projects: [], target: 0 });
+      const e = byEmployee.get(name);
+      e.projects.push(p.name);
+      e.target += Number(p.target) || 0;
+    });
+  });
+
+  const workload = [...byEmployee.values()].sort((a, b) => b.projects.length - a.projects.length);
+  const unassigned = workload.filter(x => x.projects.length === 0);
+  const overloaded = workload.filter(x => x.projects.length >= 3);
+
+  // Projects with no reviewer assigned at all.
+  const missingReviewer = activeProjects.filter(p => !(p.assignedReviewers || []).length);
+
+  // Team capacity — sum of what active projects expect per day, vs the
+  // team's current combined daily target (from today's sheet import).
+  const projectCapacity = activeProjects.reduce((s, p) => s + (Number(p.target) || 0), 0);
+  const teamCapacity = (data.team || []).reduce((s, m) => s + (Number(m.target) || 0), 0);
+  const capacityGap = projectCapacity - teamCapacity;
+
+  return (
+    <Page
+      title="Planning"
+      subtitle="Workload distribution and capacity, based on your manually-assigned employees and reviewers."
+    >
+      <div className="cards">
+        <Metric icon={FolderKanban} label="Active projects" value={activeProjects.length} />
+        <Metric icon={Users} label="Unassigned employees" value={unassigned.length} note="No project assigned" />
+        <Metric icon={AlertTriangle} label="Projects missing a reviewer" value={missingReviewer.length} />
+        <Metric
+          icon={Target}
+          label="Capacity gap"
+          value={`${capacityGap > 0 ? "+" : ""}${capacityGap.toLocaleString()}`}
+          note={capacityGap > 0 ? "Projects expect more than team target covers" : "Team target covers project needs"}
+        />
+      </div>
+
+      <div className="grid two">
+        <Panel title="Workload by employee">
+          {!workload.length ? (
+            <p className="muted">No team members yet.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Name</th><th>Assigned projects</th><th>Implied daily target</th></tr></thead>
+                <tbody>
+                  {workload.map(x => (
+                    <tr key={x.name}>
+                      <td><b>{x.name}</b></td>
+                      <td>{x.projects.length ? x.projects.join(", ") : <span className="muted">None</span>}</td>
+                      <td>{x.target.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="muted settings-note">
+            "Assigned" comes from the Assigned employees field you set on each project — set it there if someone's missing here.
+          </p>
+        </Panel>
+
+        <Panel title="Needs attention">
+          {!unassigned.length && !overloaded.length && !missingReviewer.length ? (
+            <p className="muted">Nothing needs attention right now.</p>
+          ) : (
+            <ul className="attention-list">
+              {unassigned.map(x => (
+                <li key={`un-${x.name}`}>
+                  <span className="attention-dot attention-productivity" />
+                  <span>{x.name} has no project assigned</span>
+                </li>
+              ))}
+              {overloaded.map(x => (
+                <li key={`ov-${x.name}`}>
+                  <span className="attention-dot attention-deadline" />
+                  <span>{x.name} is assigned to {x.projects.length} projects</span>
+                </li>
+              ))}
+              {missingReviewer.map(p => (
+                <li key={`rev-${p.id}`}>
+                  <span className="attention-dot attention-issue" />
+                  <span>{p.name} has no reviewer assigned</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      </div>
+    </Page>
+  );
+}
+
 function ReportTable({ rows }) {
   if (!rows.length) return null;
   const columns = Object.keys(rows[0]);
@@ -5674,6 +6278,8 @@ function SheetImport({ data, update, notify }) {
   const [accuracyFileName, setAccuracyFileName] = useState(data.accuracyFile || "");
   const [busy, setBusy] = useState(false);
   const [accuracyBusy, setAccuracyBusy] = useState(false);
+  const [pendingImport, setPendingImport] = useState(null);
+  const [importMode, setImportMode] = useState("append");
 
   function normalizeHeader(value) {
     return String(value ?? "")
@@ -5713,7 +6319,6 @@ function SheetImport({ data, update, notify }) {
 
   function parseWorkbook(file) {
     setBusy(true);
-    setFileName(file.name);
 
     const reader = new FileReader();
 
@@ -5900,35 +6505,84 @@ function SheetImport({ data, update, notify }) {
           }
         });
 
-        update({
-          ...data,
-          team: fullTeam,
-          sheetRecords: records,
-          sheetFile: file.name,
-          sheetLastSync: new Date().toISOString()
+        // Don't commit yet — hold this as a preview so the user can see
+        // what was detected and choose Replace vs Append before anything
+        // touches their saved data.
+        const workDatesDetected = [...new Set(workRecords.map(x => x.date))].sort();
+        const projectsDetected = [...new Set(
+          workRecords.map(x => getConfiguredProjectName(x.project)).filter(Boolean)
+        )];
+
+        setPendingImport({
+          fileName: file.name,
+          records,
+          fullTeam,
+          unmatchedProjectNames,
+          employeeCount: names.length,
+          projectsDetected,
+          recordCount: records.length,
+          dateStart: workDatesDetected[0] || "",
+          dateEnd: workDatesDetected[workDatesDetected.length - 1] || ""
         });
 
         setPreview(records.slice(0, 25));
-        logActivity(`Imported sheet "${file.name}" (${records.length} work records)`);
-
-        if (unmatchedProjectNames.size) {
-          const names = [...unmatchedProjectNames].slice(0, 5).join(", ");
-          const more = unmatchedProjectNames.size > 5 ? ` and ${unmatchedProjectNames.size - 5} more` : "";
-          notify(
-            `Imported ${records.length} work records. Not linked to a project yet: ${names}${more}. Add them on the Projects page if you want their targets tracked.`
-          );
-        } else {
-          notify(`Imported ${records.length} work records`);
-        }
       } catch (err) {
         console.error(err);
-        alert("Could not read this Excel file. Please use .xlsx format.");
+        alert("Could not read this Excel or CSV file. Please use .xlsx or .csv format.");
       } finally {
         setBusy(false);
       }
     };
 
     reader.readAsArrayBuffer(file);
+  }
+
+  function cancelSheetImport() {
+    setPendingImport(null);
+    setPreview([]);
+  }
+
+  function confirmSheetImport() {
+    if (!pendingImport) return;
+    const { fileName: importedFileName, records, fullTeam, unmatchedProjectNames } = pendingImport;
+
+    // Append: keep every existing record EXCEPT ones for a (date, name)
+    // this import also covers — those get replaced by the fresh version
+    // instead of duplicating, so re-importing a corrected day works
+    // correctly. Replace: existing sheet history is discarded entirely.
+    let nextRecords = records;
+    if (importMode === "append") {
+      const incomingDateNames = new Set(records.map(r => `${r.date}__${r.name}`));
+      const keptExisting = (Array.isArray(data.sheetRecords) ? data.sheetRecords : []).filter(
+        r => !incomingDateNames.has(`${r.date}__${r.name}`)
+      );
+      nextRecords = [...keptExisting, ...records];
+    }
+
+    update({
+      ...data,
+      team: fullTeam,
+      sheetRecords: nextRecords,
+      sheetFile: importedFileName,
+      sheetLastSync: new Date().toISOString()
+    });
+
+    setFileName(importedFileName);
+    logActivity(
+      `Imported sheet "${importedFileName}" (${records.length} work records, ${importMode === "append" ? "added to" : "replaced"} existing data)`
+    );
+
+    if (unmatchedProjectNames.size) {
+      const names = [...unmatchedProjectNames].slice(0, 5).join(", ");
+      const more = unmatchedProjectNames.size > 5 ? ` and ${unmatchedProjectNames.size - 5} more` : "";
+      notify(
+        `Imported ${records.length} work records. Not linked to a project yet: ${names}${more}. Add them on the Projects page if you want their targets tracked.`
+      );
+    } else {
+      notify(`Imported ${records.length} work records`);
+    }
+
+    setPendingImport(null);
   }
 
   function parseAccuracyWorkbook(file) {
@@ -6109,19 +6763,19 @@ function SheetImport({ data, update, notify }) {
         <Panel title="Daily Effort Sheet">
           <div className="import-box">
             <Upload size={28} />
-            <h3>{busy ? "Importing..." : "Upload your .xlsx file"}</h3>
-            <p>Use Google Sheets → File → Download → Microsoft Excel (.xlsx).</p>
+            <h3>{busy ? "Reading file..." : "Upload your .xlsx or .csv file"}</h3>
+            <p>Use Google Sheets → File → Download → Microsoft Excel (.xlsx) or Comma-separated values (.csv).</p>
             <label className="primary upload-label">
               <Upload size={17} />
-              Choose Excel file
+              Choose file
               <input
                 type="file"
-                accept=".xlsx,.xls"
+                accept=".xlsx,.xls,.csv"
                 hidden
                 onChange={e => e.target.files?.[0] && parseWorkbook(e.target.files[0])}
               />
             </label>
-            {fileName && (
+            {fileName && !pendingImport && (
               <div className="import-success">
                 <CheckCircle2 size={17} />
                 <span>
@@ -6133,6 +6787,59 @@ function SheetImport({ data, update, notify }) {
               </div>
             )}
           </div>
+
+          {pendingImport && (
+            <div className="import-preview">
+              <b>Preview — nothing saved yet</b>
+
+              <div className="import-preview-stats">
+                <div><span>Employees detected</span><b>{pendingImport.employeeCount}</b></div>
+                <div><span>Projects detected</span><b>{pendingImport.projectsDetected.length}</b></div>
+                <div><span>Records detected</span><b>{pendingImport.recordCount.toLocaleString()}</b></div>
+                <div><span>Date range</span><b>{pendingImport.dateStart} → {pendingImport.dateEnd}</b></div>
+              </div>
+
+              {pendingImport.unmatchedProjectNames.size > 0 && (
+                <p className="muted settings-note">
+                  Not linked to an existing project: {[...pendingImport.unmatchedProjectNames].join(", ")}
+                </p>
+              )}
+
+              <div className="import-mode-choice">
+                <label className={importMode === "append" ? "active" : ""}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={importMode === "append"}
+                    onChange={() => setImportMode("append")}
+                  />
+                  <div>
+                    <b>Add to existing data</b>
+                    <span>Keeps everything already imported. Any date this file also covers gets replaced with the fresh version.</span>
+                  </div>
+                </label>
+                <label className={importMode === "replace" ? "active" : ""}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={importMode === "replace"}
+                    onChange={() => setImportMode("replace")}
+                  />
+                  <div>
+                    <b>Replace all existing data</b>
+                    <span>Discards every previously imported record and starts fresh from just this file.</span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="modal-actions">
+                <button className="secondary" onClick={cancelSheetImport}>Cancel</button>
+                <button className="primary" onClick={confirmSheetImport}>
+                  <CheckCircle2 size={16} /> Confirm import
+                </button>
+              </div>
+            </div>
+          )}
         </Panel>
 
         <Panel title="Accuracy Report">
@@ -6363,6 +7070,23 @@ function SettingsPage({
         <p className="muted settings-note">
           These are personal display preferences saved on this browser only — they don't change what your team sees.
         </p>
+      </Panel>
+
+      <Panel title="Keyboard shortcuts">
+        <p className="muted settings-note">Press <b>g</b>, then a letter, to jump to a page. Ignored while typing in a field.</p>
+        <div className="role-reference" style={{ marginTop: 10 }}>
+          <div><b>g d</b><span>Dashboard</span></div>
+          <div><b>g t</b><span>Team</span></div>
+          <div><b>g a</b><span>Attendance</span></div>
+          <div><b>g p</b><span>Projects</span></div>
+          <div><b>g q</b><span>QA & Reviews</span></div>
+          <div><b>g i</b><span>Issues</span></div>
+          <div><b>g n</b><span>Analytics</span></div>
+          <div><b>g r</b><span>Reports</span></div>
+          <div><b>g e</b><span>Recognition</span></div>
+          <div><b>g s</b><span>Settings</span></div>
+          <div><b>g u</b><span>Sheet Import</span></div>
+        </div>
       </Panel>
 
       {isAdmin && <UserAccessPanel myId={myId} notify={notify} />}
