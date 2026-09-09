@@ -105,7 +105,9 @@ const seed = {
 
   holidays: [],
 
-  attendanceOverrides: []
+  attendanceOverrides: [],
+
+  coachingNotes: []
 };
 
 
@@ -159,6 +161,10 @@ function loadData() {
 
       attendanceOverrides: Array.isArray(saved.attendanceOverrides)
         ? saved.attendanceOverrides
+        : [],
+
+      coachingNotes: Array.isArray(saved.coachingNotes)
+        ? saved.coachingNotes
         : [],
 
       accuracyFile: saved.accuracyFile || "",
@@ -1501,6 +1507,7 @@ function DashboardApp({ session, profile, onSignOut }) {
           accuracyRecords: Array.isArray(cloud.accuracyRecords) ? cloud.accuracyRecords : [],
           holidays: Array.isArray(cloud.holidays) ? cloud.holidays : [],
           attendanceOverrides: Array.isArray(cloud.attendanceOverrides) ? cloud.attendanceOverrides : [],
+          coachingNotes: Array.isArray(cloud.coachingNotes) ? cloud.coachingNotes : [],
           accuracyFile: cloud.accuracyFile || "",
           accuracyLastSync: cloud.accuracyLastSync || "",
           sheetFile: cloud.sheetFile || "",
@@ -1866,6 +1873,34 @@ function DashboardApp({ session, profile, onSignOut }) {
     logActivity(`${nextStatus === "Inactive" ? "Deactivated" : "Reactivated"} team member "${name}"`);
   }
 
+  function addCoachingNote(name, type, text) {
+    if (!canManageTeam) return notify("Only Admin or Team Lead can add coaching notes.");
+    if (!text || !text.trim()) return;
+
+    const note = {
+      id: Date.now(),
+      name,
+      type,
+      text: text.trim(),
+      date: new Date().toISOString().slice(0, 10)
+    };
+
+    update({
+      ...data,
+      coachingNotes: [...(Array.isArray(data.coachingNotes) ? data.coachingNotes : []), note]
+    });
+    notify("Coaching note added");
+    logActivity(`Added a ${type} note for "${name}"`);
+  }
+
+  function deleteCoachingNote(id) {
+    if (!canManageTeam) return notify("Only Admin or Team Lead can delete coaching notes.");
+    update({
+      ...data,
+      coachingNotes: (Array.isArray(data.coachingNotes) ? data.coachingNotes : []).filter(n => n.id !== id)
+    });
+  }
+
   function clearImportedData() {
     if (!canManageTeam) return notify("Only Admin or Team Lead can clear imported data.");
     if (!confirm("Clear all imported sheet data and reset project completed counts? This cannot be undone.")) return;
@@ -2178,6 +2213,9 @@ function DashboardApp({ session, profile, onSignOut }) {
         <TeamProfileModal
           name={viewingProfile}
           data={data}
+          canManage={canManageTeam}
+          onAddNote={addCoachingNote}
+          onDeleteNote={deleteCoachingNote}
           onClose={() => setViewingProfile(null)}
         />
       )}
@@ -7407,7 +7445,14 @@ function Page({
   );
 }
 
-function TeamProfileModal({ name, data, onClose }) {
+function TeamProfileModal({ name, data, canManage, onAddNote, onDeleteNote, onClose }) {
+  const [noteType, setNoteType] = useState("Feedback");
+  const [noteText, setNoteText] = useState("");
+
+  const myNotes = (Array.isArray(data.coachingNotes) ? data.coachingNotes : [])
+    .filter(n => n.name === name)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+
   const member = (Array.isArray(data.team) ? data.team : []).find(m => m.name === name) || {
     name, role: "—", status: "—", target: 0, completed: 0, reviewed: 0, errors: 0
   };
@@ -7543,6 +7588,57 @@ function TeamProfileModal({ name, data, onClose }) {
             </div>
           ) : (
             <p className="muted">No work history yet.</p>
+          )}
+        </div>
+
+        <div className="modal-section">
+          <b>Coaching notes</b>
+
+          {canManage && (
+            <div className="coaching-form">
+              <select value={noteType} onChange={e => setNoteType(e.target.value)}>
+                <option>Feedback</option>
+                <option>Improvement Plan</option>
+                <option>Training</option>
+                <option>Calibration</option>
+              </select>
+              <textarea
+                rows={2}
+                placeholder="Write a note…"
+                value={noteText}
+                onChange={e => setNoteText(e.target.value)}
+              />
+              <button
+                className="secondary compact-btn"
+                onClick={() => {
+                  onAddNote(name, noteType, noteText);
+                  setNoteText("");
+                }}
+              >
+                Add note
+              </button>
+            </div>
+          )}
+
+          {myNotes.length ? (
+            <ul className="coaching-list">
+              {myNotes.map(n => (
+                <li key={n.id}>
+                  <div>
+                    <span className="coaching-type">{n.type}</span>
+                    <span className="coaching-date">{n.date}</span>
+                  </div>
+                  <p>{n.text}</p>
+                  {canManage && (
+                    <button className="delete" onClick={() => onDeleteNote(n.id)}>
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">No coaching notes yet.</p>
           )}
         </div>
       </div>
