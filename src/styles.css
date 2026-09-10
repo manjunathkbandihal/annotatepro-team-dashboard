@@ -1108,3 +1108,19 @@
   .import-preview-stats { grid-template-columns: 1fr 1fr; }
   .modal { padding: 18px; }
 }
+
+/* Project drag-and-drop reordering */
+.project-drag-handle {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  cursor: grab;
+  margin-right: 2px;
+}
+.project-drag-handle:active { cursor: grabbing; }
+.project-card { transition: transform .12s, box-shadow .12s, border-color .12s; }
+.project-card-dragging { opacity: .5; }
+.project-card-dragover {
+  border: 1.5px dashed var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
