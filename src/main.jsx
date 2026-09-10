@@ -7,7 +7,7 @@ import {
   Download, Upload, Menu, X, CheckCircle2, Target,
   Image as ImageIcon, ChevronRight, Trash2, Activity, ShieldCheck,
   LogOut, Mail, LockKeyhole, Pencil, Save, ExternalLink, FileText, Printer,
-  Calendar, Sun, Clock, Archive, Moon, Trophy, ClipboardList
+  Calendar, Sun, Clock, Archive, Moon, Trophy, ClipboardList, Copy, GripVertical
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 import "./styles.css";
@@ -1385,57 +1385,6 @@ function DashboardApp({ session, profile, onSignOut }) {
       clearTimeout(timer);
     };
   }, []);
-
-  // Keyboard shortcuts: press "g" then a letter to jump to a page.
-  // Ignored while typing in any input/textarea/select, so it never
-  // interferes with normal typing.
-  useEffect(() => {
-    let awaitingSecondKey = false;
-    let resetTimer = null;
-
-    const shortcutMap = {
-      d: "dashboard",
-      t: "team",
-      a: "attendance",
-      p: "projects",
-      q: "qa",
-      i: "issues",
-      n: "analytics",
-      r: "reports",
-      e: "recognition",
-      s: "settings",
-      u: "sheet"
-    };
-
-    function handleKeyDown(e) {
-      const tag = document.activeElement?.tagName;
-      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag) || document.activeElement?.isContentEditable) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-
-      const key = e.key.toLowerCase();
-
-      if (!awaitingSecondKey) {
-        if (key === "g") {
-          awaitingSecondKey = true;
-          clearTimeout(resetTimer);
-          resetTimer = setTimeout(() => { awaitingSecondKey = false; }, 1200);
-        }
-        return;
-      }
-
-      awaitingSecondKey = false;
-      clearTimeout(resetTimer);
-      if (shortcutMap[key]) {
-        setPage(shortcutMap[key]);
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      clearTimeout(resetTimer);
-    };
-  }, []);
   const [query, setQuery] = useState("");
   const [sidebar, setSidebar] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -1743,6 +1692,17 @@ function DashboardApp({ session, profile, onSignOut }) {
     logActivity(`Updated project "${name}"`);
   }
 
+  function reorderProjects(newOrderIds) {
+    if (!canManageProjects) return;
+
+    const all = Array.isArray(data.projects) ? data.projects : [];
+    const byId = new Map(all.map(p => [p.id, p]));
+    const reordered = newOrderIds.map(id => byId.get(id)).filter(Boolean);
+    const remaining = all.filter(p => !newOrderIds.includes(p.id));
+
+    update({ ...data, projects: [...reordered, ...remaining] });
+  }
+
   function archiveProject(id) {
     if (!canManageProjects) return notify("Only Admin or Team Lead can archive projects.");
 
@@ -1756,6 +1716,31 @@ function DashboardApp({ session, profile, onSignOut }) {
     });
     notify(archived ? `${project.name} archived` : `${project.name} unarchived`);
     logActivity(`${archived ? "Archived" : "Unarchived"} project "${project.name}"`);
+  }
+
+  function duplicateProject(id) {
+    if (!canManageProjects) return notify("Only Admin or Team Lead can duplicate projects.");
+
+    const project = (Array.isArray(data.projects) ? data.projects : []).find(p => p.id === id);
+    if (!project) return;
+
+    const copy = {
+      ...project,
+      id: Date.now(),
+      name: `${project.name} (Copy)`,
+      completed: 0,
+      remaining: Number(project.totalImages ?? project.total) || 0,
+      status: getProjectStatus(Number(project.totalImages ?? project.total) || 0, 0, Number(project.totalImages ?? project.total) || 0),
+      archived: false
+    };
+
+    update({
+      ...data,
+      projects: [copy, ...(Array.isArray(data.projects) ? data.projects : [])]
+    });
+    notify(`Duplicated "${project.name}" — rename and adjust as needed`);
+    logActivity(`Duplicated project "${project.name}"`);
+    setEditingProject(copy);
   }
 
   function updateIssue(id, changes) {
@@ -2133,6 +2118,8 @@ function DashboardApp({ session, profile, onSignOut }) {
               }}
               openEdit={setEditingProject}
               onArchive={archiveProject}
+              onDuplicate={duplicateProject}
+              onReorder={reorderProjects}
             />
           )}
 
@@ -3879,13 +3866,36 @@ function Attendance({ data, update, canManage, notify }) {
 /* =========================================================
    PROJECTS
 ========================================================= */
-function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive }) {
+function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive, onDuplicate, onReorder }) {
   const [showArchived, setShowArchived] = useState(false);
   const [viewingProject, setViewingProject] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
 
   const visibleRows = rows.filter(p => (showArchived ? true : !p.archived));
   const archivedCount = rows.filter(p => p.archived).length;
+
+  function handleDrop(targetId) {
+    if (!canManage || draggedId == null || draggedId === targetId) {
+      setDraggedId(null);
+      setDragOverId(null);
+      return;
+    }
+
+    const ids = visibleRows.map(p => p.id);
+    const fromIndex = ids.indexOf(draggedId);
+    const toIndex = ids.indexOf(targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    const next = [...ids];
+    next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, draggedId);
+
+    onReorder(next);
+    setDraggedId(null);
+    setDragOverId(null);
+  }
 
   function toggleSelect(id) {
     setSelected(prev => {
@@ -3939,8 +3949,33 @@ function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive 
           const s = getProjectStats(p);
 
           return (
-            <div className={`project-card ${p.archived ? "project-card-archived" : ""}`} key={p.id}>
+            <div
+              className={`project-card ${p.archived ? "project-card-archived" : ""} ${dragOverId === p.id && draggedId !== p.id ? "project-card-dragover" : ""} ${draggedId === p.id ? "project-card-dragging" : ""}`}
+              key={p.id}
+              draggable={canManage}
+              onDragStart={() => setDraggedId(p.id)}
+              onDragOver={e => {
+                if (!canManage) return;
+                e.preventDefault();
+                if (dragOverId !== p.id) setDragOverId(p.id);
+              }}
+              onDragLeave={() => setDragOverId(prev => (prev === p.id ? null : prev))}
+              onDrop={e => {
+                e.preventDefault();
+                handleDrop(p.id);
+              }}
+              onDragEnd={() => {
+                setDraggedId(null);
+                setDragOverId(null);
+              }}
+            >
               <div className="project-card-top">
+                {canManage && (
+                  <span className="project-drag-handle" title="Drag to reorder">
+                    <GripVertical size={16} />
+                  </span>
+                )}
+
                 {canManage ? (
                   <label className="project-select">
                     <input
@@ -3966,6 +4001,16 @@ function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive 
                       onClick={() => openEdit(p)}
                     >
                       <Pencil size={16} />
+                    </button>
+
+                    <button
+                      className="icon-btn project-edit-btn"
+                      type="button"
+                      title="Duplicate project"
+                      aria-label={`Duplicate ${p.name}`}
+                      onClick={() => onDuplicate(p.id)}
+                    >
+                      <Copy size={16} />
                     </button>
 
                     <button
