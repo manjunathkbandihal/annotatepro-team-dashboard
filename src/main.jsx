@@ -8173,4 +8173,4 @@ function Modal({ type, team, onClose, onSubmit }) {
 /* =========================================================
    START APP
 ========================================================= */
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(<App />); 
