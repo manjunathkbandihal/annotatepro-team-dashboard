@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import html2canvas from "html2canvas";
 import { createRoot } from "react-dom/client";
 import {
   LayoutDashboard, Users, FolderKanban, ClipboardCheck,
@@ -107,7 +108,9 @@ const seed = {
 
   attendanceOverrides: [],
 
-  coachingNotes: []
+  coachingNotes: [],
+
+  auditLog: []
 };
 
 
@@ -165,6 +168,10 @@ function loadData() {
 
       coachingNotes: Array.isArray(saved.coachingNotes)
         ? saved.coachingNotes
+        : [],
+
+      auditLog: Array.isArray(saved.auditLog)
+        ? saved.auditLog
         : [],
 
       accuracyFile: saved.accuracyFile || "",
@@ -1457,6 +1464,7 @@ function DashboardApp({ session, profile, onSignOut }) {
           holidays: Array.isArray(cloud.holidays) ? cloud.holidays : [],
           attendanceOverrides: Array.isArray(cloud.attendanceOverrides) ? cloud.attendanceOverrides : [],
           coachingNotes: Array.isArray(cloud.coachingNotes) ? cloud.coachingNotes : [],
+          auditLog: Array.isArray(cloud.auditLog) ? cloud.auditLog : [],
           accuracyFile: cloud.accuracyFile || "",
           accuracyLastSync: cloud.accuracyLastSync || "",
           sheetFile: cloud.sheetFile || "",
@@ -1480,20 +1488,39 @@ function DashboardApp({ session, profile, onSignOut }) {
     return () => { active = false; };
   }, [profile, canManageTeam]);
 
-  const update = async next => {
+  const update = async (next, auditMessage) => {
     if (isSupabaseConfigured && supabase && !canManageTeam) {
       notify("Your role is view-only for this action.");
       return false;
     }
 
-    setData(next);
-    saveData(next);
+    // Shared, cross-device audit trail — separate from the on-device-only
+    // Activity History in Settings. Folded into the SAME save as the
+    // actual change, never a second update() call, so there's no race
+    // where one write could clobber the other.
+    const finalNext = auditMessage
+      ? {
+          ...next,
+          auditLog: [
+            {
+              id: Date.now(),
+              message: auditMessage,
+              who: profile?.full_name || session?.user?.email || "Someone",
+              at: new Date().toISOString()
+            },
+            ...(Array.isArray(next.auditLog) ? next.auditLog : Array.isArray(data.auditLog) ? data.auditLog : [])
+          ].slice(0, 300)
+        }
+      : next;
+
+    setData(finalNext);
+    saveData(finalNext);
 
     if (!isSupabaseConfigured || !supabase || !dataReady) return true;
 
     const { error } = await supabase
       .from("dashboard_state")
-      .upsert({ id: 1, data: next, updated_at: new Date().toISOString() });
+      .upsert({ id: 1, data: finalNext, updated_at: new Date().toISOString() });
 
     if (error) {
       console.error("Online save failed", error);
@@ -1644,16 +1671,17 @@ function DashboardApp({ session, profile, onSignOut }) {
       ];
     }
 
-    update(next);
-    setShowAdd(false);
-    notify("Saved successfully");
-    logActivity(
+    const addMessage =
       addType === "team"
         ? `Added team member "${f.get("name")}"`
         : addType === "project"
         ? `Added project "${f.get("name")}"`
-        : `Logged issue "${f.get("type")}" on ${f.get("project")}`
-    );
+        : `Logged issue "${f.get("type")}" on ${f.get("project")}`;
+
+    update(next, addMessage);
+    setShowAdd(false);
+    notify("Saved successfully");
+    logActivity(addMessage);
   }
 
   function editProject(e) {
@@ -1686,7 +1714,7 @@ function DashboardApp({ session, profile, onSignOut }) {
         : project
     );
 
-    update({ ...data, projects });
+    update({ ...data, projects }, `Updated project "${name}"`);
     setEditingProject(null);
     notify("Project updated successfully");
     logActivity(`Updated project "${name}"`);
@@ -1710,10 +1738,13 @@ function DashboardApp({ session, profile, onSignOut }) {
     if (!project) return;
     const archived = !project.archived;
 
-    update({
-      ...data,
-      projects: (Array.isArray(data.projects) ? data.projects : []).map(p => (p.id === id ? { ...p, archived } : p))
-    });
+    update(
+      {
+        ...data,
+        projects: (Array.isArray(data.projects) ? data.projects : []).map(p => (p.id === id ? { ...p, archived } : p))
+      },
+      `${archived ? "Archived" : "Unarchived"} project "${project.name}"`
+    );
     notify(archived ? `${project.name} archived` : `${project.name} unarchived`);
     logActivity(`${archived ? "Archived" : "Unarchived"} project "${project.name}"`);
   }
@@ -1734,10 +1765,13 @@ function DashboardApp({ session, profile, onSignOut }) {
       archived: false
     };
 
-    update({
-      ...data,
-      projects: [copy, ...(Array.isArray(data.projects) ? data.projects : [])]
-    });
+    update(
+      {
+        ...data,
+        projects: [copy, ...(Array.isArray(data.projects) ? data.projects : [])]
+      },
+      `Duplicated project "${project.name}"`
+    );
     notify(`Duplicated "${project.name}" — rename and adjust as needed`);
     logActivity(`Duplicated project "${project.name}"`);
     setEditingProject(copy);
@@ -1761,8 +1795,9 @@ function DashboardApp({ session, profile, onSignOut }) {
       return next;
     });
 
-    update({ ...data, issues });
-    logActivity(`Updated issue "${(Array.isArray(data.issues) ? data.issues : []).find(i => i.id === id)?.type || id}"`);
+    const issueType = (Array.isArray(data.issues) ? data.issues : []).find(i => i.id === id)?.type || id;
+    update({ ...data, issues }, `Updated issue "${issueType}"`);
+    logActivity(`Updated issue "${issueType}"`);
   }
 
   function addIssueComment(id, text) {
@@ -1783,13 +1818,18 @@ function DashboardApp({ session, profile, onSignOut }) {
 
     const removedName = data[kind].find(x => x.id === id)?.name || data[kind].find(x => x.id === id)?.type;
 
-    update({
-      ...data,
-      [kind]: data[kind].filter(x => x.id !== id)
-    });
+    const removeMsg = `Deleted ${kind.slice(0, -1)}${removedName ? ` "${removedName}"` : ""}`;
+
+    update(
+      {
+        ...data,
+        [kind]: data[kind].filter(x => x.id !== id)
+      },
+      removeMsg
+    );
 
     notify("Deleted");
-    logActivity(`Deleted ${kind.slice(0, -1)}${removedName ? ` "${removedName}"` : ""}`);
+    logActivity(removeMsg);
   }
 
   function saveTeamMember(formData, editing) {
@@ -1831,7 +1871,7 @@ function DashboardApp({ session, profile, onSignOut }) {
         : data.sheetRecords
     };
 
-    update(next);
+    update(next, `Deleted team member "${name}"`);
     notify("Team member deleted");
     logActivity(`Deleted team member "${name}"`);
   }
@@ -1853,9 +1893,10 @@ function DashboardApp({ session, profile, onSignOut }) {
       )
     };
 
-    update(next);
+    const statusMsg = `${nextStatus === "Inactive" ? "Deactivated" : "Reactivated"} team member "${name}"`;
+    update(next, statusMsg);
     notify(nextStatus === "Inactive" ? `${name} deactivated` : `${name} reactivated`);
-    logActivity(`${nextStatus === "Inactive" ? "Deactivated" : "Reactivated"} team member "${name}"`);
+    logActivity(statusMsg);
   }
 
   function addCoachingNote(name, type, text) {
@@ -1870,10 +1911,13 @@ function DashboardApp({ session, profile, onSignOut }) {
       date: new Date().toISOString().slice(0, 10)
     };
 
-    update({
-      ...data,
-      coachingNotes: [...(Array.isArray(data.coachingNotes) ? data.coachingNotes : []), note]
-    });
+    update(
+      {
+        ...data,
+        coachingNotes: [...(Array.isArray(data.coachingNotes) ? data.coachingNotes : []), note]
+      },
+      `Added a ${type} note for "${name}"`
+    );
     notify("Coaching note added");
     logActivity(`Added a ${type} note for "${name}"`);
   }
@@ -1900,15 +1944,18 @@ function DashboardApp({ session, profile, onSignOut }) {
       };
     });
 
-    update({
-      ...data,
-      sheetRecords: [],
-      accuracyRecords: [],
-      sheetFile: "",
-      accuracyFile: "",
-      sheetLastSync: "",
-      projects
-    });
+    update(
+      {
+        ...data,
+        sheetRecords: [],
+        accuracyRecords: [],
+        sheetFile: "",
+        accuracyFile: "",
+        sheetLastSync: "",
+        projects
+      },
+      "Cleared imported sheet data and reset project completed counts"
+    );
 
     notify("Imported data cleared");
     logActivity("Cleared imported sheet data and reset project completed counts");
@@ -2161,6 +2208,7 @@ function DashboardApp({ session, profile, onSignOut }) {
               notify={notify}
               myId={profile?.id}
               isAdmin={role === "admin"}
+              data={data}
             />
           )}
 
@@ -2739,6 +2787,30 @@ function LoginScreen() {
    DASHBOARD
 ========================================================= */
 function Dashboard({ totals, data, setPage }) {
+  const dashboardRef = useRef(null);
+  const [exportingImage, setExportingImage] = useState(false);
+
+  async function handleExportImage() {
+    if (!dashboardRef.current) return;
+    setExportingImage(true);
+    try {
+      const canvas = await html2canvas(dashboardRef.current, {
+        backgroundColor: getComputedStyle(document.body).getPropertyValue("--bg-page") || "#ffffff",
+        scale: 2,
+        useCORS: true
+      });
+      const link = document.createElement("a");
+      link.download = `annotatepro-dashboard-${new Date().toISOString().slice(0, 10)}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (err) {
+      console.error("Could not export dashboard as image", err);
+      alert("Could not export the dashboard as an image. Check the browser console for details.");
+    } finally {
+      setExportingImage(false);
+    }
+  }
+
   const latestDate = getLatestImportedDate(data);
 
   // Today's attendance snapshot — reuses the exact same logic as the
@@ -2836,11 +2908,27 @@ function Dashboard({ totals, data, setPage }) {
           </p>
         </div>
 
-        <button className="primary" onClick={() => setPage("team")}>
-          <Users size={18} />
-          Manage team
-        </button>
+        <div className="page-head-actions">
+          <button className="secondary" onClick={handleExportImage} disabled={exportingImage}>
+            <ImageIcon size={17} />
+            {exportingImage ? "Saving…" : "Save as image"}
+          </button>
+          <button className="secondary" onClick={() => window.print()}>
+            <Printer size={17} />
+            Export snapshot
+          </button>
+          <button className="primary" onClick={() => setPage("team")}>
+            <Users size={18} />
+            Manage team
+          </button>
+        </div>
       </div>
+
+      <div className="dashboard-printable" ref={dashboardRef}>
+        <div className="dashboard-print-head">
+          <h2>AnnotatePro — Dashboard snapshot</h2>
+          <p className="muted">{new Date().toLocaleString()}</p>
+        </div>
 
       <div className="cards">
         <Metric
@@ -3115,6 +3203,7 @@ function Dashboard({ totals, data, setPage }) {
             <ChevronRight />
           </button>
         </Panel>
+      </div>
       </div>
     </div>
   );
@@ -3732,8 +3821,9 @@ function Attendance({ data, update, canManage, notify }) {
     // Empty selection means "back to auto" — just drop the override.
     const next = status ? [...withoutThis, { id: `${name}__${date}`, name, date, status }] : withoutThis;
 
-    update({ ...data, attendanceOverrides: next });
-    logActivity(`Marked ${name}'s attendance on ${date} as ${status || "auto"}`);
+    const attMsg = `Marked ${name}'s attendance on ${date} as ${status || "auto"}`;
+    update({ ...data, attendanceOverrides: next }, attMsg);
+    logActivity(attMsg);
   }
 
   const pct = (status) => matrix.workingDaySlots ? Math.round(((matrix.summary[status] || 0) / matrix.workingDaySlots) * 100) : 0;
@@ -6650,18 +6740,21 @@ function SheetImport({ data, update, notify }) {
       nextRecords = [...keptExisting, ...records];
     }
 
-    update({
-      ...data,
-      team: fullTeam,
-      sheetRecords: nextRecords,
-      sheetFile: importedFileName,
-      sheetLastSync: new Date().toISOString()
-    });
+    const importMsg = `Imported sheet "${importedFileName}" (${records.length} work records, ${importMode === "append" ? "added to" : "replaced"} existing data)`;
+
+    update(
+      {
+        ...data,
+        team: fullTeam,
+        sheetRecords: nextRecords,
+        sheetFile: importedFileName,
+        sheetLastSync: new Date().toISOString()
+      },
+      importMsg
+    );
 
     setFileName(importedFileName);
-    logActivity(
-      `Imported sheet "${importedFileName}" (${records.length} work records, ${importMode === "append" ? "added to" : "replaced"} existing data)`
-    );
+    logActivity(importMsg);
 
     if (unmatchedProjectNames.size) {
       const names = [...unmatchedProjectNames].slice(0, 5).join(", ");
@@ -6820,16 +6913,21 @@ function SheetImport({ data, update, notify }) {
           return;
         }
 
-        update({
-          ...data,
-          accuracyRecords: records,
-          accuracyFile: file.name,
-          accuracyLastSync: new Date().toISOString()
-        });
+        const accuracyMsg = `Imported Accuracy Report "${file.name}" (${records.length} team members)`;
+
+        update(
+          {
+            ...data,
+            accuracyRecords: records,
+            accuracyFile: file.name,
+            accuracyLastSync: new Date().toISOString()
+          },
+          accuracyMsg
+        );
 
         setAccuracyPreview(records.slice(0, 25));
         notify(`Imported Accuracy Report for ${records.length} team members`);
-        logActivity(`Imported Accuracy Report "${file.name}" (${records.length} team members)`);
+        logActivity(accuracyMsg);
       } catch (err) {
         console.error(err);
         alert("Could not read this Accuracy Report. Please use .xlsx format and check the column names.");
@@ -7069,11 +7167,13 @@ function SettingsPage({
   canManage,
   notify,
   myId,
-  isAdmin
+  isAdmin,
+  data
 }) {
   const [prefs, setPrefs] = useState(loadPrefs);
   const [activity, setActivity] = useState(getActivityLog);
   const [visibleActivityCount, setVisibleActivityCount] = useState(10);
+  const [visibleAuditCount, setVisibleAuditCount] = useState(10);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
 
   function updatePref(key, value) {
@@ -7302,6 +7402,37 @@ function SettingsPage({
                 onClick={() => setVisibleActivityCount(v => v + 10)}
               >
                 Load more ({activity.length - visibleActivityCount} more)
+              </button>
+            )}
+          </>
+        )}
+
+        <div className="settings-row-top">
+          <b style={{ fontSize: 13 }}>Team activity</b>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 0" }}>
+            A shared record of changes made by anyone on the team, synced across devices — who did what, and when.
+          </p>
+        </div>
+
+        {(!Array.isArray(data?.auditLog) || data.auditLog.length === 0) ? (
+          <p className="muted">No team activity recorded yet.</p>
+        ) : (
+          <>
+            <ul className="activity-list">
+              {data.auditLog.slice(0, visibleAuditCount).map(a => (
+                <li key={a.id}>
+                  <span><b>{a.who}</b> — {a.message}</span>
+                  <small>{new Date(a.at).toLocaleString()}</small>
+                </li>
+              ))}
+            </ul>
+
+            {visibleAuditCount < data.auditLog.length && (
+              <button
+                className="secondary compact-btn load-more-btn"
+                onClick={() => setVisibleAuditCount(v => v + 10)}
+              >
+                Load more ({data.auditLog.length - visibleAuditCount} more)
               </button>
             )}
           </>
