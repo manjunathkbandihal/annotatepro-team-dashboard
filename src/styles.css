@@ -385,7 +385,6 @@
 .report-export-btns .secondary { display: inline-flex; align-items: center; gap: 6px; }
 .report-export-btns .secondary:disabled { opacity: .5; cursor: not-allowed; }
 .report-print-head { display: none; }
-.dashboard-print-head { display: none; }
 
 @media (max-width: 800px) {
   .report-controls { flex-direction: column; align-items: stretch; }
@@ -393,19 +392,18 @@
   .report-actions { flex-direction: column; align-items: stretch; }
 }
 
-/* Print only the report/dashboard content, not the whole app chrome */
+/* Print only the report content, not the whole app chrome */
 @media print {
   body * { visibility: hidden; }
-  .report-printable, .report-printable *,
-  .dashboard-printable, .dashboard-printable * { visibility: visible; }
-  .report-printable, .dashboard-printable {
+  .report-printable, .report-printable * { visibility: visible; }
+  .report-printable {
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
   }
-  .report-print-head, .dashboard-print-head { display: block; margin-bottom: 16px; }
-  .report-print-head h2, .dashboard-print-head h2 { margin: 0 0 4px; }
+  .report-print-head { display: block; margin-bottom: 16px; }
+  .report-print-head h2 { margin: 0 0 4px; }
 }
 
 /* Attendance */
@@ -1125,9 +1123,4 @@
 .project-card-dragover {
   border: 1.5px dashed var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
-}
-
-.page-head-actions { display: flex; align-items: center; gap: 10px; }
-@media (max-width: 600px) {
-  .page-head-actions { flex-direction: column; align-items: stretch; width: 100%; }
 }
