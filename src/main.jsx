@@ -1278,11 +1278,7 @@ function App() {
         }
       }
 
-      const normalizedRole = ["admin", "team_lead", "member"].includes(
-        String(resolvedRole || "").toLowerCase()
-      )
-        ? String(resolvedRole).toLowerCase()
-        : "member";
+      const normalizedRole = normalizeRole(resolvedRole);
 
       setProfile({
         id: user.id,
@@ -1299,7 +1295,7 @@ function App() {
       if (!row) {
         const { error: insertError } = await supabase
           .from("profiles")
-          .upsert({ id: user.id, email: user.email, full_name: fallbackName, role: "member" });
+          .upsert({ id: user.id, email: user.email, full_name: fallbackName, role: "annotator" });
 
         if (insertError) {
           console.warn("Could not create profile row on first login", insertError);
@@ -1416,11 +1412,26 @@ function DashboardApp({ session, profile, onSignOut }) {
     return () => document.removeEventListener("mousedown", handleClickAway);
   }, [showNotif]);
 
-  const role = profile?.role || "member";
-  const canManageTeam = ["admin", "team_lead"].includes(role);
-  const canManageProjects = ["admin", "team_lead"].includes(role);
-  const canManageIssues = ["admin", "team_lead"].includes(role);
-  const canImport = ["admin", "team_lead"].includes(role);
+  const role = normalizeRole(profile?.role);
+  const isAdminRole = role === "admin";
+  const isManagerUp = ["admin", "manager"].includes(role);
+  const isLeadUp = ["admin", "manager", "team_lead"].includes(role);
+  const canWrite = true; // every signed-in role may save; each action has its own check below
+  const canManageTeam = isLeadUp;                 // add / edit / deactivate members, attendance
+  const canDeleteTeam = isManagerUp;
+  const canManageProjects = isLeadUp;             // add / edit / archive / reorder / duplicate
+  const canDeleteProjects = isManagerUp;
+  const canCreateIssue = true;                    // everyone can log an issue
+  const canManageIssues = isLeadUp || role === "reviewer"; // edit / resolve / comment-status
+  const canDeleteIssues = isLeadUp;
+  const canAddCoaching = isLeadUp || role === "reviewer";
+  const canDeleteCoaching = isLeadUp;
+  const canImport = isLeadUp;
+  const canViewReports = role !== "annotator";
+  const canBackup = isManagerUp;
+  const canRestore = isAdminRole;                 // restore + clear imported data
+  const canManageUsers = isManagerUp;             // assign roles (Manager cannot touch Admin)
+  const canViewAudit = isManagerUp;
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase || !profile) return;
@@ -1472,7 +1483,7 @@ function DashboardApp({ session, profile, onSignOut }) {
         };
         setData(normalized);
         saveData(normalized);
-      } else if (canManageTeam) {
+      } else if (isLeadUp) {
         const local = loadData();
         setData(local);
         const { error: seedError } = await supabase
@@ -1486,10 +1497,10 @@ function DashboardApp({ session, profile, onSignOut }) {
 
     loadCloudData();
     return () => { active = false; };
-  }, [profile, canManageTeam]);
+  }, [profile, isLeadUp]);
 
   const update = async (next, auditMessage) => {
-    if (isSupabaseConfigured && supabase && !canManageTeam) {
+    if (isSupabaseConfigured && supabase && !canWrite) {
       notify("Your role is view-only for this action.");
       return false;
     }
@@ -1551,6 +1562,10 @@ function DashboardApp({ session, profile, onSignOut }) {
     ["sheet", "Sheet Import", Upload]
   ];
 
+  const visibleNav = nav.filter(([id]) =>
+    !((id === "sheet" && !canImport) || (id === "reports" && !canViewReports))
+  );
+
   const filteredTeam = useMemo(
     () =>
       (Array.isArray(data.team) ? data.team : []).filter(x =>
@@ -1605,9 +1620,9 @@ function DashboardApp({ session, profile, onSignOut }) {
 
   function addRecord(e) {
     e.preventDefault();
-    if (addType === "team" && !canManageTeam) return notify("Only Admin or Team Lead can manage team members.");
-    if (addType === "project" && !canManageProjects) return notify("Only Admin or Team Lead can manage projects.");
-    if (addType === "issue" && !canManageIssues) return notify("Only Admin or Team Lead can manage issues.");
+    if (addType === "team" && !canManageTeam) return notify("Your role doesn't have permission to manage team members.");
+    if (addType === "project" && !canManageProjects) return notify("Your role doesn't have permission to manage projects.");
+    if (addType === "issue" && !canCreateIssue) return notify("Your role doesn't have permission to manage issues.");
     const f = new FormData(e.currentTarget);
     let next = { ...data };
 
@@ -1686,7 +1701,7 @@ function DashboardApp({ session, profile, onSignOut }) {
 
   function editProject(e) {
     e.preventDefault();
-    if (!canManageProjects) return notify("Only Admin or Team Lead can manage projects.");
+    if (!canManageProjects) return notify("Your role doesn't have permission to manage projects.");
     const f = new FormData(e.currentTarget);
     if (!editingProject) return;
 
@@ -1732,7 +1747,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function archiveProject(id) {
-    if (!canManageProjects) return notify("Only Admin or Team Lead can archive projects.");
+    if (!canManageProjects) return notify("Your role doesn't have permission to archive projects.");
 
     const project = (Array.isArray(data.projects) ? data.projects : []).find(p => p.id === id);
     if (!project) return;
@@ -1750,7 +1765,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function duplicateProject(id) {
-    if (!canManageProjects) return notify("Only Admin or Team Lead can duplicate projects.");
+    if (!canManageProjects) return notify("Your role doesn't have permission to duplicate projects.");
 
     const project = (Array.isArray(data.projects) ? data.projects : []).find(p => p.id === id);
     if (!project) return;
@@ -1778,7 +1793,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function updateIssue(id, changes) {
-    if (!canManageIssues) return notify("Only Admin or Team Lead can update issues.");
+    if (!canManageIssues) return notify("Your role doesn't have permission to update issues.");
 
     const issues = (Array.isArray(data.issues) ? data.issues : []).map(issue => {
       if (issue.id !== id) return issue;
@@ -1812,8 +1827,8 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function remove(kind, id) {
-    if (kind === "projects" && !canManageProjects) return notify("Only Admin or Team Lead can delete projects.");
-    if (kind === "issues" && !canManageIssues) return notify("Only Admin or Team Lead can delete issues.");
+    if (kind === "projects" && !canDeleteProjects) return notify("Your role doesn't have permission to delete projects.");
+    if (kind === "issues" && !canDeleteIssues) return notify("Your role doesn't have permission to delete issues.");
     if (!confirm("Delete this record?")) return;
 
     const removedName = data[kind].find(x => x.id === id)?.name || data[kind].find(x => x.id === id)?.type;
@@ -1833,7 +1848,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function saveTeamMember(formData, editing) {
-    if (!canManageTeam) return notify("Only Admin or Team Lead can manage team members.");
+    if (!canManageTeam) return notify("Your role doesn't have permission to manage team members.");
 
     const name = String(formData.get("name") || "").trim();
     if (!name) return;
@@ -1860,7 +1875,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function removeTeamMember(name) {
-    if (!canManageTeam) return notify("Only Admin or Team Lead can delete team members.");
+    if (!canDeleteTeam) return notify("Your role doesn't have permission to delete team members.");
     if (!confirm(`Delete ${name} from the team?`)) return;
 
     const next = {
@@ -1877,7 +1892,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function toggleMemberStatus(name) {
-    if (!canManageTeam) return notify("Only Admin or Team Lead can deactivate team members.");
+    if (!canManageTeam) return notify("Your role doesn't have permission to deactivate team members.");
 
     const member = (Array.isArray(data.team) ? data.team : []).find(x => String(x.name).toLowerCase() === String(name).toLowerCase());
     if (!member) return;
@@ -1900,7 +1915,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function addCoachingNote(name, type, text) {
-    if (!canManageTeam) return notify("Only Admin or Team Lead can add coaching notes.");
+    if (!canAddCoaching) return notify("Your role doesn't have permission to add coaching notes.");
     if (!text || !text.trim()) return;
 
     const note = {
@@ -1923,7 +1938,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function deleteCoachingNote(id) {
-    if (!canManageTeam) return notify("Only Admin or Team Lead can delete coaching notes.");
+    if (!canDeleteCoaching) return notify("Your role doesn't have permission to delete coaching notes.");
     update({
       ...data,
       coachingNotes: (Array.isArray(data.coachingNotes) ? data.coachingNotes : []).filter(n => n.id !== id)
@@ -1931,7 +1946,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function clearImportedData() {
-    if (!canManageTeam) return notify("Only Admin or Team Lead can clear imported data.");
+    if (!canRestore) return notify("Your role doesn't have permission to clear imported data.");
     if (!confirm("Clear all imported sheet data and reset project completed counts? This cannot be undone.")) return;
 
     const projects = (Array.isArray(data.projects) ? data.projects : []).map(p => {
@@ -1976,6 +1991,7 @@ function DashboardApp({ session, profile, onSignOut }) {
   }
 
   function importData(e) {
+    if (!canRestore) return notify("Your role doesn't have permission to restore backups.");
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -2033,7 +2049,7 @@ function DashboardApp({ session, profile, onSignOut }) {
         </div>
 
         <nav>
-          {nav.map(([key, label, Icon]) => (
+          {visibleNav.map(([key, label, Icon]) => (
             <button
               key={key}
               className={page === key ? "active" : ""}
@@ -2131,8 +2147,9 @@ function DashboardApp({ session, profile, onSignOut }) {
               rows={filteredTeam}
               data={data}
               canManage={canManageTeam}
+              canDelete={canDeleteTeam}
               openAdd={() => {
-                if (!canManageTeam) return notify("Only Admin or Team Lead can add members.");
+                if (!canManageTeam) return notify("Your role doesn't have permission to add members.");
                 setEditingMember(null);
                 setAddType("team");
                 setShowAdd(true);
@@ -2159,6 +2176,7 @@ function DashboardApp({ session, profile, onSignOut }) {
               data={data}
               remove={remove}
               canManage={canManageProjects}
+              canDelete={canDeleteProjects}
               openAdd={() => {
                 setAddType("project");
                 setShowAdd(true);
@@ -2178,6 +2196,8 @@ function DashboardApp({ session, profile, onSignOut }) {
               data={data}
               remove={remove}
               canManage={canManageIssues}
+              canCreate={canCreateIssue}
+              canDelete={canDeleteIssues}
               onUpdate={updateIssue}
               onComment={addIssueComment}
               openAdd={() => {
@@ -2189,7 +2209,17 @@ function DashboardApp({ session, profile, onSignOut }) {
 
           {page === "analytics" && <Analytics data={data} />}
 
-          {page === "reports" && <Reports data={data} />}
+          {page === "reports" && (
+            canViewReports ? (
+              <Reports data={data} />
+            ) : (
+              <Page title="Reports" subtitle="Reports and exports are not available for Annotator accounts.">
+                <Panel title="Permission required">
+                  <p className="muted">Ask your Team Lead or Manager for a report if you need one.</p>
+                </Panel>
+              </Page>
+            )
+          )}
 
           {page === "recognition" && <Recognition data={data} />}
 
@@ -2204,10 +2234,14 @@ function DashboardApp({ session, profile, onSignOut }) {
               storageOnline={isSupabaseConfigured}
               email={session?.user?.email}
               onSignOut={onSignOut}
-              canManage={canManageTeam}
+              canManage={canRestore}
+              canBackup={canBackup}
+              canRestore={canRestore}
+              canViewAudit={canViewAudit}
               notify={notify}
               myId={profile?.id}
-              isAdmin={role === "admin"}
+              isAdmin={canManageUsers}
+              viewerRole={role}
               data={data}
             />
           )}
@@ -2216,7 +2250,7 @@ function DashboardApp({ session, profile, onSignOut }) {
             canImport ? (
               <SheetImport data={data} update={update} notify={notify} />
             ) : (
-              <Page title="Sheet Import" subtitle="Daily imports are restricted to Admin and Team Lead accounts.">
+              <Page title="Sheet Import" subtitle="Daily imports are restricted to Admin, Manager and Team Lead accounts.">
                 <Panel title="Permission required">
                   <p className="muted">Your current role can view dashboard data but cannot import or overwrite daily sheet data.</p>
                 </Panel>
@@ -2256,7 +2290,8 @@ function DashboardApp({ session, profile, onSignOut }) {
         <TeamProfileModal
           name={viewingProfile}
           data={data}
-          canManage={canManageTeam}
+          canManage={canAddCoaching}
+          canDelete={canDeleteCoaching}
           onAddNote={addCoachingNote}
           onDeleteNote={deleteCoachingNote}
           onClose={() => setViewingProfile(null)}
@@ -2273,8 +2308,23 @@ function DashboardApp({ session, profile, onSignOut }) {
   );
 }
 
+const ALL_ROLES = ["admin", "manager", "team_lead", "reviewer", "annotator"];
+
+// Old accounts used "member" — treat them as Annotator so nobody loses access.
+function normalizeRole(value) {
+  const r = String(value || "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (ALL_ROLES.includes(r)) return r;
+  return "annotator";
+}
+
 function roleLabel(role) {
-  return ({ admin: "Admin", team_lead: "Team Lead", member: "Member" }[role] || "Member");
+  return ({
+    admin: "Admin",
+    manager: "Manager",
+    team_lead: "Team Lead",
+    reviewer: "Reviewer",
+    annotator: "Annotator"
+  }[normalizeRole(role)]);
 }
 
 function AuthLoading({ text = "Loading AnnotatePro..." }) {
@@ -3276,7 +3326,7 @@ function Panel({ title, action, onAction, children }) {
 /* =========================================================
    TEAM
 ========================================================= */
-function Team({ rows, data, openAdd, canManage, onEdit, onDelete, onToggleStatus, onView }) {
+function Team({ rows, data, openAdd, canManage, canDelete, onEdit, onDelete, onToggleStatus, onView }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState("all");
@@ -3629,9 +3679,11 @@ function Team({ rows, data, openAdd, canManage, onEdit, onDelete, onToggleStatus
                           >
                             {x.status === "Inactive" ? "Reactivate" : "Deactivate"}
                           </button>
-                          <button className="delete" onClick={() => onDelete(x.name)} title={`Delete ${x.name}`}>
-                            <Trash2 size={16} />
-                          </button>
+                          {canDelete && (
+                            <button className="delete" onClick={() => onDelete(x.name)} title={`Delete ${x.name}`}>
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     )}
@@ -3790,7 +3842,7 @@ function Attendance({ data, update, canManage, notify }) {
 
   function addHoliday(e) {
     e.preventDefault();
-    if (!canManage) return notify && notify("Only Admin or Team Lead can manage holidays.");
+    if (!canManage) return notify && notify("Your role doesn't have permission to manage holidays.");
 
     const d = normalizeDateValue(holidayDate);
     if (!d) return;
@@ -3805,7 +3857,7 @@ function Attendance({ data, update, canManage, notify }) {
   }
 
   function removeHoliday(id) {
-    if (!canManage) return notify && notify("Only Admin or Team Lead can manage holidays.");
+    if (!canManage) return notify && notify("Your role doesn't have permission to manage holidays.");
     update({
       ...data,
       holidays: (Array.isArray(data.holidays) ? data.holidays : []).filter(h => h.id !== id)
@@ -3813,7 +3865,7 @@ function Attendance({ data, update, canManage, notify }) {
   }
 
   function setAttendanceOverride(name, date, status) {
-    if (!canManage) return notify && notify("Only Admin or Team Lead can mark attendance.");
+    if (!canManage) return notify && notify("Your role doesn't have permission to mark attendance.");
 
     const existing = Array.isArray(data.attendanceOverrides) ? data.attendanceOverrides : [];
     const withoutThis = existing.filter(o => !(o.name === name && o.date === date));
@@ -3956,7 +4008,7 @@ function Attendance({ data, update, canManage, notify }) {
 /* =========================================================
    PROJECTS
 ========================================================= */
-function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive, onDuplicate, onReorder }) {
+function Projects({ rows, data, remove, openAdd, openEdit, canManage, canDelete, onArchive, onDuplicate, onReorder }) {
   const [showArchived, setShowArchived] = useState(false);
   const [viewingProject, setViewingProject] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
@@ -4029,7 +4081,7 @@ function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive,
         <div className="bulk-actions-bar">
           <span>{selected.size} selected</span>
           <button className="secondary compact-btn" onClick={bulkArchive}><Archive size={14} /> Archive</button>
-          <button className="secondary danger compact-btn" onClick={bulkDelete}><Trash2 size={14} /> Delete</button>
+          {canDelete && <button className="secondary danger compact-btn" onClick={bulkDelete}><Trash2 size={14} /> Delete</button>}
           <button className="link-btn" onClick={() => setSelected(new Set())}>Clear selection</button>
         </div>
       )}
@@ -4113,15 +4165,17 @@ function Projects({ rows, data, remove, openAdd, openEdit, canManage, onArchive,
                       <Archive size={16} />
                     </button>
 
-                    <button
-                      className="delete"
-                      type="button"
-                      title="Delete project"
-                      aria-label={`Delete ${p.name}`}
-                      onClick={() => remove("projects", p.id)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    {canDelete && (
+                      <button
+                        className="delete"
+                        type="button"
+                        title="Delete project"
+                        aria-label={`Delete ${p.name}`}
+                        onClick={() => remove("projects", p.id)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -4594,7 +4648,7 @@ function QA({ data }) {
 /* =========================================================
    ISSUES
 ========================================================= */
-function Issues({ rows, data, remove, openAdd, canManage, onUpdate, onComment }) {
+function Issues({ rows, data, remove, openAdd, canManage, canCreate, canDelete, onUpdate, onComment }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState("all");
@@ -4648,7 +4702,7 @@ function Issues({ rows, data, remove, openAdd, canManage, onUpdate, onComment })
     <Page
       title="Issues tracker"
       subtitle="Capture annotation problems and close them before submission."
-      action={canManage ? "+ Log issue" : undefined}
+      action={canCreate ? "+ Log issue" : undefined}
       onAction={openAdd}
     >
       <div className="cards">
@@ -4738,16 +4792,18 @@ function Issues({ rows, data, remove, openAdd, canManage, onUpdate, onComment })
             <button className="secondary compact-btn" onClick={() => { selectedIds.forEach(id => onUpdate(id, { status: "Closed" })); setSelectedIds([]); }}>
               Mark Closed
             </button>
-            <button
-              className="secondary danger compact-btn"
-              onClick={() => {
-                if (!confirm(`Delete ${selectedIds.length} issue${selectedIds.length === 1 ? "" : "s"}?`)) return;
-                selectedIds.forEach(id => remove("issues", id));
-                setSelectedIds([]);
-              }}
-            >
-              Delete
-            </button>
+            {canDelete && (
+              <button
+                className="secondary danger compact-btn"
+                onClick={() => {
+                  if (!confirm(`Delete ${selectedIds.length} issue${selectedIds.length === 1 ? "" : "s"}?`)) return;
+                  selectedIds.forEach(id => remove("issues", id));
+                  setSelectedIds([]);
+                }}
+              >
+                Delete
+              </button>
+            )}
             <button className="link-btn" onClick={() => setSelectedIds([])}>Clear</button>
           </div>
         )}
@@ -4812,7 +4868,7 @@ function Issues({ rows, data, remove, openAdd, canManage, onUpdate, onComment })
                     <td className={overdue ? "danger-text" : undefined}>{x.dueDate || "—"}{overdue ? " (overdue)" : ""}</td>
                     <td>{x.date}</td>
                     <td>
-                      {canManage && (
+                      {canDelete && (
                         <button
                           className="delete"
                           onClick={() => remove("issues", x.id)}
@@ -7165,9 +7221,13 @@ function SettingsPage({
   email,
   onSignOut,
   canManage,
+  canBackup,
+  canRestore,
+  canViewAudit,
   notify,
   myId,
   isAdmin,
+  viewerRole,
   data
 }) {
   const [prefs, setPrefs] = useState(loadPrefs);
@@ -7280,9 +7340,10 @@ function SettingsPage({
         </div>
       </Panel>
 
-      {isAdmin && <UserAccessPanel myId={myId} notify={notify} />}
+      {isAdmin && <UserAccessPanel myId={myId} notify={notify} viewerRole={viewerRole} />}
 
       <Panel title="Data management">
+        {canBackup && (
         <div className="settings-row">
           <div>
             <b>Export backup</b>
@@ -7295,6 +7356,9 @@ function SettingsPage({
           </button>
         </div>
 
+        )}
+
+        {canRestore && (
         <div className="settings-row">
           <div>
             <b>Import backup</b>
@@ -7313,6 +7377,9 @@ function SettingsPage({
           </label>
         </div>
 
+        )}
+
+        {canRestore && (
         <div className="settings-row">
           <div>
             <b>Clear imported data</b>
@@ -7321,12 +7388,13 @@ function SettingsPage({
 
           <button
             className="secondary danger"
-            onClick={() => (canManage ? clearImportedData() : notify("Only Admin or Team Lead can clear imported data."))}
+            onClick={() => (canManage ? clearImportedData() : notify("Your role doesn't have permission to clear imported data."))}
           >
             <Trash2 size={17} />
             Clear
           </button>
         </div>
+        )}
 
         <div className="settings-row">
           <div>
@@ -7407,6 +7475,7 @@ function SettingsPage({
           </>
         )}
 
+        {canViewAudit && (<>
         <div className="settings-row-top">
           <b style={{ fontSize: 13 }}>Team activity</b>
           <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 0" }}>
@@ -7438,12 +7507,16 @@ function SettingsPage({
           </>
         )}
 
+        </>)}
+
         <div className="settings-row-top">
           <b style={{ fontSize: 13 }}>What each role can do</b>
           <div className="role-reference">
-            <div><b>Admin</b><span>Everything, including managing users and roles.</span></div>
-            <div><b>Team Lead</b><span>Manage team, projects, issues, imports and holidays.</span></div>
-            <div><b>Member</b><span>View-only access across the dashboard.</span></div>
+            <div><b>Admin</b><span>Everything, including restoring backups, clearing data and assigning any role.</span></div>
+            <div><b>Manager</b><span>Manage team, projects, issues, imports and reports; delete records; assign roles (except Admin); export backups.</span></div>
+            <div><b>Team Lead</b><span>Add and edit team, attendance, projects, issues and imports. Cannot delete team members or projects.</span></div>
+            <div><b>Reviewer</b><span>Reviews quality: log and resolve issues, add coaching notes, view reports. No team, project or import changes.</span></div>
+            <div><b>Annotator</b><span>View the dashboard and log issues. No reports, imports or edits.</span></div>
           </div>
         </div>
       </Panel>
@@ -7451,7 +7524,8 @@ function SettingsPage({
   );
 }
 
-function UserAccessPanel({ myId, notify }) {
+function UserAccessPanel({ myId, notify, viewerRole }) {
+  const viewerIsAdmin = viewerRole === "admin";
   const [users, setUsers] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [savingId, setSavingId] = useState(null);
@@ -7484,6 +7558,10 @@ function UserAccessPanel({ myId, notify }) {
 
   async function changeRole(userId, newRole, oldRole) {
     if (newRole === oldRole) return;
+    if (!viewerIsAdmin && (newRole === "admin" || normalizeRole(oldRole) === "admin")) {
+      notify("Only an Admin can grant or change the Admin role.");
+      return;
+    }
     setSavingId(userId);
 
     const { error } = await supabase.from("profiles").update({ role: newRole }).eq("id", userId);
@@ -7503,7 +7581,7 @@ function UserAccessPanel({ myId, notify }) {
   return (
     <Panel title="User & access">
       <p className="muted settings-note">
-        New people sign up on the login screen — set their role here afterward. Admin can manage everything; Team Lead can manage team, projects, issues and imports; Member is view-only.
+        Create accounts in Supabase (Authentication → Add user), then set each person's role here. Admin: everything. Manager: manage and assign roles (not Admin). Team Lead: team, projects, issues, imports. Reviewer: quality and issues. Annotator: view and log issues.
       </p>
 
       {users === null ? (
@@ -7528,13 +7606,16 @@ function UserAccessPanel({ myId, notify }) {
                 </div>
 
                 <select
-                  value={u.role || "member"}
-                  disabled={u.id === myId || savingId === u.id}
+                  value={normalizeRole(u.role)}
+                  disabled={u.id === myId || savingId === u.id || (!viewerIsAdmin && normalizeRole(u.role) === "admin")}
                   onChange={e => changeRole(u.id, e.target.value, u.role)}
                 >
-                  <option value="admin">Admin</option>
+                  {viewerIsAdmin && <option value="admin">Admin</option>}
+                  {!viewerIsAdmin && normalizeRole(u.role) === "admin" && <option value="admin">Admin</option>}
+                  <option value="manager">Manager</option>
                   <option value="team_lead">Team Lead</option>
-                  <option value="member">Member</option>
+                  <option value="reviewer">Reviewer</option>
+                  <option value="annotator">Annotator</option>
                 </select>
               </li>
             );
@@ -7629,7 +7710,7 @@ function Page({
   );
 }
 
-function TeamProfileModal({ name, data, canManage, onAddNote, onDeleteNote, onClose }) {
+function TeamProfileModal({ name, data, canManage, canDelete, onAddNote, onDeleteNote, onClose }) {
   const [noteType, setNoteType] = useState("Feedback");
   const [noteText, setNoteText] = useState("");
 
@@ -7813,7 +7894,7 @@ function TeamProfileModal({ name, data, canManage, onAddNote, onDeleteNote, onCl
                     <span className="coaching-date">{n.date}</span>
                   </div>
                   <p>{n.text}</p>
-                  {canManage && (
+                  {canDelete && (
                     <button className="delete" onClick={() => onDeleteNote(n.id)}>
                       <Trash2 size={13} />
                     </button>
@@ -8173,4 +8254,4 @@ function Modal({ type, team, onClose, onSubmit }) {
 /* =========================================================
    START APP
 ========================================================= */
-createRoot(document.getElementById("root")).render(<App />); 
+createRoot(document.getElementById("root")).render(<App />);
